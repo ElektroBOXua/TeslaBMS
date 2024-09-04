@@ -10,16 +10,6 @@
 #define TBMS_MAX_COMMANDS    20
 #define TBMS_MAX_IO_BUF      4
 
-#ifdef TBMS_DEBUG
-#define TBMS_OBJECT_CREATE(name)             \
-	static struct tbms_debug name##_obj; \
-	static struct tbms *name = (struct tbms *)&name##_obj
-#else
-#define TBMS_OBJECT_CREATE(name)       \
-	static struct tbms name##_obj; \
-	static struct tbms *name = (struct tbms *)&name##_obj
-#endif
-
 ///////////////////////////////////////////////////////////////////////////////
 uint8_t tbms_gen_crc(uint8_t *data, int len)
 {
@@ -52,10 +42,11 @@ enum tbms_io_state {
 };
 
 enum tbms_io_flag {
-	TBMS_IO_FLAG_NONE     = 0,
-	TBMS_IO_FLAG_TX_READY = 1,
-	TBMS_IO_FLAG_RX_READY = 2,
-	TBMS_IO_FLAG_TIMEOUT  = 4
+	TBMS_IO_FLAG_NONE      = 0,
+	TBMS_IO_FLAG_TX_READY  = 1,
+	TBMS_IO_FLAG_REG_WRITE = 2,
+	TBMS_IO_FLAG_RX_READY  = 4,
+	TBMS_IO_FLAG_TIMEOUT   = 8
 };
 
 struct tbms_io {
@@ -95,6 +86,29 @@ void tbms_io_init(struct tbms_io *self, enum tbms_io_state state)
 	self->timeout = 100;
 }
 
+void tbms_io_packet(struct tbms_io *self)
+{
+	assert(self->tx_len && self->tx_len < TBMS_MAX_IO_BUF);
+		
+	memcpy(self->buf, self->tx_buf, self->tx_len);
+
+	self->len = self->tx_len;
+	
+	//Calculate CRC for register write operation
+	if (self->flags & TBMS_IO_FLAG_REG_WRITE) {
+		self->flags  &= ~TBMS_IO_FLAG_REG_WRITE;
+
+		self->buf[0] |= 1;
+		self->buf[self->len] = tbms_gen_crc(self->buf, self->tx_len);
+
+		self->len++;
+	}
+			
+	self->state = TBMS_IO_STATE_WAIT_FOR_SEND;
+		
+	self->flags |= TBMS_IO_FLAG_TX_READY;
+}
+
 void tbms_io_update(struct tbms_io *self)
 {
 	if (self->timer >= self->timeout) {
@@ -108,18 +122,7 @@ void tbms_io_update(struct tbms_io *self)
 		return;
 	
 	case TBMS_IO_STATE_SEND_WITH_REPLY:
-		assert(self->tx_len && self->tx_len < TBMS_MAX_IO_BUF);
-		
-		memcpy(self->buf, self->tx_buf, self->tx_len);
-		self->buf[0] |= 1; //SEND flag
-		self->buf[self->tx_len] =
-					 tbms_gen_crc(self->buf, self->tx_len);
-
-		self->len = self->tx_len + 1;
-		
-		self->state = TBMS_IO_STATE_WAIT_FOR_SEND;
-		
-		self->flags |= TBMS_IO_FLAG_TX_READY;
+		tbms_io_packet(self);
 		break;
 
 	case TBMS_IO_STATE_WAIT_FOR_SEND:
@@ -145,7 +148,7 @@ void tbms_io_update(struct tbms_io *self)
 			self->state = TBMS_IO_STATE_GOOD_REPLY;
 			break;
 		}
-		
+
 		self->state = TBMS_IO_STATE_BAD_REPLY;
 		
 		break;
@@ -180,15 +183,18 @@ char *tbms_io_get_state_name(uint8_t state)
 	case TBMS_IO_STATE_BAD_REPLY:       return "BAD_REPLY";
 	case TBMS_IO_STATE_WAIT_FOR_SYSTEM: return "WAIT_FOR_SYSTEM";
 	}
+	
+	return NULL;
 }
 
-#define TBMS_IO_FLAGS_FMT "%s%s%s%s"
+#define TBMS_IO_FLAGS_FMT "%s%s%s%s%s"
 
-#define TBMS_IO_GET_FLAG_NAMES(flags)                      \
-	flags == TBMS_IO_FLAG_NONE    ? "|NONE|"     : "", \
-	flags & TBMS_IO_FLAG_TX_READY ? "|TX_READY|" : "", \
-	flags & TBMS_IO_FLAG_RX_READY ? "|RX_READY|" : "", \
-	flags & TBMS_IO_FLAG_TIMEOUT  ? "|TIMEOUT|"  : ""
+#define TBMS_IO_GET_FLAG_NAMES(flags)                        \
+	flags == TBMS_IO_FLAG_NONE     ? "|NONE|"      : "", \
+	flags & TBMS_IO_FLAG_TX_READY  ? "|TX_READY|"  : "", \
+	flags & TBMS_IO_FLAG_REG_WRITE ? "|REG_WRITE|" : "", \
+	flags & TBMS_IO_FLAG_RX_READY  ? "|RX_READY|"  : "", \
+	flags & TBMS_IO_FLAG_TIMEOUT   ? "|TIMEOUT|"   : ""
 #endif //TBMS_DEBUG
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -213,6 +219,12 @@ struct tbms
 	
 	struct tbms_module modules[TBMS_MAX_MODULE_ADDR];
 };
+
+#ifndef TBMS_DEBUG
+#define TBMS_OBJECT_CREATE(name) \
+	struct tbms name##_obj;  \
+	struct tbms *name = (struct tbms *)&name##_obj
+#endif
 
 void tbms_init(struct tbms *self)
 {
@@ -281,24 +293,51 @@ void tbms_discover(struct tbms *self)
 
 void tbms_discover_cmd(struct tbms *self)
 {
-	static uint8_t discover_cmd[] = {
+	static uint8_t cmd[] = {
 		0x3F << 1, //broadcast the reset command
 		0x3C,      //reset
 		0xA5       //data to cause a reset
 	};
 
-	static uint8_t expected_reply[] = {0x7F, 0x3C, 0xA5, 0x57};
+	static uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
 
 	tbms_io_init(&self->io, TBMS_IO_STATE_SEND_WITH_REPLY);
+	self->io.flags |= TBMS_IO_FLAG_REG_WRITE; //Write into register
 	
-	self->io.tx_buf = &discover_cmd;
-	self->io.tx_len = sizeof(discover_cmd);
+	self->io.tx_buf = &cmd;
+	self->io.tx_len = sizeof(cmd);
 
 	self->io.rx_buf = &expected_reply;
 	self->io.rx_len = sizeof(expected_reply);
 
 	tbms_pop_command(self);
 	tbms_push_command(self, TBMS_COMMAND_SETUP_BOARDS);
+}
+
+void tbms_setup_boards_cmd(struct tbms *self)
+{
+	if (self->io.state == TBMS_IO_STATE_BAD_REPLY) {
+		tbms_pop_command(self);
+		return;
+	}
+	
+	static uint8_t cmd[] = {
+		0,
+		0, //read registers starting at 0
+		1  //read one byte
+	};
+
+	static uint8_t expected_reply[] = { 0x80, 0x00, 0x01 };
+
+	tbms_io_init(&self->io, TBMS_IO_STATE_SEND_WITH_REPLY);
+	
+	self->io.tx_buf = &cmd;
+	self->io.tx_len = sizeof(cmd);
+
+	self->io.rx_buf = &expected_reply;
+	self->io.rx_len = sizeof(expected_reply);
+
+	tbms_pop_command(self);
 }
 
 //////////////////// UPDATE ////////////////////
@@ -323,6 +362,7 @@ void tbms_update(struct tbms *self, clock_t delta)
 
 	switch (self->commands[0]) {
 	case TBMS_COMMAND_DISCOVER: tbms_discover_cmd(self); break;
+	case TBMS_COMMAND_SETUP_BOARDS: tbms_setup_boards_cmd(self); break;
 	}
 }
 
@@ -335,6 +375,10 @@ struct tbms_debug
 	uint8_t io_flags;
 	uint8_t io_state;
 };
+
+#define TBMS_OBJECT_CREATE(name)      \
+	struct tbms_debug name##_obj; \
+	struct tbms *name = (struct tbms *)&name##_obj
 
 void tbms_init_debug(struct tbms *_self)
 {
@@ -375,17 +419,15 @@ void tbms_update_debug(struct tbms *_self, clock_t delta)
 ///////////////////////////////////////////////////////////////////////////////
 TBMS_OBJECT_CREATE(tb);
 
-static uint8_t reply[] = {0x7F, 0x3C, 0xA5, 0x57};
+static uint8_t reply[] = {0x7F, 0x3C, 0xA5, 0x57, 0x80, 0x00, 0x01};
 static uint8_t reply_i = 0;
 
-int update()
+void update()
 {
-	tbms_update(tb, 1);
-	
 	if (tbms_tx_available(tb)) {		
 		printf("Sending: ");
 		
-		for (int i = 0; i < tbms_get_tx_len(tb); i++)
+		for (size_t i = 0; i < tbms_get_tx_len(tb); i++)
 			printf("0x%02X ", tbms_get_tx_buf(tb)[i]);
 
 		printf("\n");
@@ -398,6 +440,8 @@ int update()
 
 		reply_i++;
 	}
+
+	tbms_update(tb, 1);
 }
 
 int main()
