@@ -31,20 +31,18 @@ uint8_t tbms_gen_crc(uint8_t *data, int len)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+enum tbms_io_event {
+	TBMS_IO_EVENT_NONE,
+	TBMS_IO_EVENT_REPLY,
+	TBMS_IO_EVENT_ERROR
+};
+
 enum tbms_io_state {
 	TBMS_IO_STATE_IDLE,
 	TBMS_IO_STATE_WAIT_FOR_SEND,
 	TBMS_IO_STATE_WAIT_FOR_REPLY,
 	TBMS_IO_STATE_RX_DONE,
-	TBMS_IO_STATE_GOOD_REPLY,
-	TBMS_IO_STATE_BAD_REPLY,
-	TBMS_IO_STATE_WAIT_FOR_SYSTEM
-};
-
-enum tbms_io_reply {
-	TBMS_IO_REPLY_NONE,
-	TBMS_IO_REPLY_OK,
-	TBMS_IO_REPLY_BAD
+	TBMS_IO_STATE_ERROR
 };
 
 enum tbms_io_flag {
@@ -58,9 +56,6 @@ struct tbms_io {
 	enum tbms_io_state state;
 
 	uint8_t flags;
-
-	void *tx_buf;
-	void *rx_buf;
 
 	uint8_t tx_len;
 	uint8_t rx_len;
@@ -78,9 +73,6 @@ void tbms_io_init(struct tbms_io *self)
 
 	self->flags = TBMS_IO_FLAG_NONE;
 
-	self->tx_buf = 0;
-	self->tx_buf = 0;
-
 	self->tx_len = 0;
 	self->rx_len = 0;
 
@@ -91,11 +83,11 @@ void tbms_io_init(struct tbms_io *self)
 	self->timeout = 100;
 }
 
-void tbms_io_add_packet(struct tbms_io *self, bool reg_write)
+void tbms_io_add_packet(struct tbms_io *self, uint8_t *tx_data, bool reg_write)
 {
 	assert(self->tx_len && self->tx_len < TBMS_MAX_IO_BUF);
 		
-	memcpy(self->buf, self->tx_buf, self->tx_len);
+	memcpy(self->buf, tx_data, self->tx_len);
 
 	self->len = self->tx_len;
 	
@@ -106,27 +98,27 @@ void tbms_io_add_packet(struct tbms_io *self, bool reg_write)
 
 		self->len++;
 	}
-			
+
 	self->state = TBMS_IO_STATE_WAIT_FOR_SEND;
 		
 	self->flags |= TBMS_IO_FLAG_TX_READY;
 }
 
-enum tbms_io_reply tbms_io_get_reply(struct tbms_io *self)
+enum tbms_io_event tbms_io_get_event(struct tbms_io *self)
 {
-	if (self->state == TBMS_IO_STATE_IDLE)
-		return TBMS_IO_REPLY_BAD;
+	if (self->state == TBMS_IO_STATE_ERROR)
+		return TBMS_IO_EVENT_ERROR;
 
-	if (self->state == TBMS_IO_STATE_GOOD_REPLY)
-		return TBMS_IO_REPLY_OK;
+	if (self->state == TBMS_IO_STATE_RX_DONE)
+		return TBMS_IO_EVENT_REPLY;
 			
-	return TBMS_IO_REPLY_NONE;
+	return TBMS_IO_EVENT_NONE;
 }
 
 void tbms_io_update(struct tbms_io *self)
 {
 	if (self->timer >= self->timeout) {
-		self->state  = TBMS_IO_STATE_WAIT_FOR_SYSTEM;
+		self->state  = TBMS_IO_STATE_ERROR;
 		self->flags |= TBMS_IO_FLAG_TIMEOUT;
 	}
 	
@@ -139,7 +131,8 @@ void tbms_io_update(struct tbms_io *self)
 		if (self->flags & TBMS_IO_FLAG_TX_READY)
 			break;
 		
-		self->flags |= TBMS_IO_FLAG_RX_READY;
+		self->flags &= ~TBMS_IO_FLAG_TX_READY;
+		self->flags |=  TBMS_IO_FLAG_RX_READY;
 				
 		self->state = TBMS_IO_STATE_WAIT_FOR_REPLY;
 		
@@ -151,34 +144,27 @@ void tbms_io_update(struct tbms_io *self)
 		if (self->flags & TBMS_IO_FLAG_RX_READY)
 			break;
 		
+		self->flags |= TBMS_IO_FLAG_RX_READY;
+		
 		if (self->len < self->rx_len)
 			break;
+		
+		self->flags &= ~TBMS_IO_FLAG_RX_READY;
 		
 		self->state = TBMS_IO_STATE_RX_DONE;
 		
 		break;
 	
 	case TBMS_IO_STATE_RX_DONE:
-		self->state = TBMS_IO_STATE_BAD_REPLY;
-
-		if (!memcmp(self->rx_buf, self->buf, self->len))
-			self->state = TBMS_IO_STATE_GOOD_REPLY;
-
-		break;
+		self->state = TBMS_IO_STATE_IDLE;
 		
-	case TBMS_IO_STATE_GOOD_REPLY:
-	case TBMS_IO_STATE_BAD_REPLY:
-		tbms_io_init(self);
 		break;
 
-	case TBMS_IO_STATE_WAIT_FOR_SYSTEM:
+	case TBMS_IO_STATE_ERROR:
 		//Return to idle if flags were cleared by system
 		if (!self->flags)
 			tbms_io_init(self);
 	}
-	
-	if (self->state == TBMS_IO_STATE_WAIT_FOR_REPLY)
-		self->flags |= TBMS_IO_FLAG_RX_READY;
 }
 
 //////////////////// DEBUG ////////////////////
@@ -190,9 +176,7 @@ char *tbms_io_get_state_name(uint8_t state)
 	case TBMS_IO_STATE_WAIT_FOR_SEND:   return "WAIT_FOR_SEND";
 	case TBMS_IO_STATE_WAIT_FOR_REPLY:  return "WAIT_FOR_REPLY";
 	case TBMS_IO_STATE_RX_DONE:         return "RX_DONE";
-	case TBMS_IO_STATE_GOOD_REPLY:      return "GOOD_REPLY";
-	case TBMS_IO_STATE_BAD_REPLY:       return "BAD_REPLY";
-	case TBMS_IO_STATE_WAIT_FOR_SYSTEM: return "WAIT_FOR_SYSTEM";
+	case TBMS_IO_STATE_ERROR:           return "ERROR";
 	}
 	
 	return NULL;
@@ -296,21 +280,18 @@ void tbms_pop_task(struct tbms *self)
 
 void tbms_setup_boards_task(struct tbms *self)
 {
-	static uint8_t cmd[] = {
+	uint8_t cmd[] = {
 		0,
 		0, //read registers starting at 0
 		1  //read one byte
 	};
 
-	static uint8_t expected_reply[] = { 0x80, 0x00, 0x01/*, 0x61*/};
+	//static uint8_t expected_reply[] = { 0x80, 0x00, 0x01/*, 0x??*/};
+
+	self->io.tx_len = 3;
+	self->io.rx_len = 4;
 	
-	self->io.tx_buf = &cmd;
-	self->io.tx_len = sizeof(cmd);
-
-	self->io.rx_buf = &expected_reply;
-	self->io.rx_len = sizeof(expected_reply);
-
-	tbms_io_add_packet(&self->io, false);
+	tbms_io_add_packet(&self->io, cmd, false);
 
 	tbms_pop_task(self);
 }
@@ -322,35 +303,35 @@ void tbms_discover(struct tbms *self)
 
 void tbms_discover_task(struct tbms *self)
 {
-	static uint8_t cmd[] = {
-		0x3F << 1, //broadcast the reset task
-		0x3C,      //reset
-		0xA5       //data to cause a reset
-	};
-
-	static uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
-
 	switch (self->state) {
-	case 0:
-		self->io.tx_buf = &cmd;
-		self->io.tx_len = sizeof(cmd);
-
-		self->io.rx_buf = &expected_reply;
-		self->io.rx_len = sizeof(expected_reply);
-
-		tbms_io_add_packet(&self->io, true);
+	case 0: {
+		uint8_t cmd[] = {
+			0x3F << 1, //broadcast the reset task
+			0x3C,      //reset
+			0xA5       //data to cause a reset
+		};
+		
+		self->io.tx_len = 3;
+		self->io.rx_len = 4;
+		
+		tbms_io_add_packet(&self->io, cmd, true);
 
 		self->state++;
 
 		break;
-
+	}
 	case 1:
-		if (tbms_io_get_reply(&self->io) == TBMS_IO_REPLY_NONE)
+		if (tbms_io_get_event(&self->io) == TBMS_IO_EVENT_NONE)
 			break;
-
+		
 		tbms_pop_task(self);
 
-		if (tbms_io_get_reply(&self->io) == TBMS_IO_REPLY_OK)
+		if (tbms_io_get_event(&self->io) == TBMS_IO_EVENT_ERROR)
+			break;
+	
+		const uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
+		
+		if (!memcmp(self->io.buf, expected_reply, 4))
 			tbms_push_task(self, TBMS_COMMAND_SETUP_BOARDS);
 
 		break;
@@ -401,13 +382,13 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 {
 	tbms_update(&self->tb, delta);
 
-	if (self->io_flags != self->tb.io.flags) {
+	/*if (self->io_flags != self->tb.io.flags) {
 		printf("tbms.io.flags: "
 			TBMS_IO_FLAGS_FMT" -> "TBMS_IO_FLAGS_FMT"\n",
 			TBMS_IO_GET_FLAG_NAMES(self->io_flags),
 			TBMS_IO_GET_FLAG_NAMES(self->tb.io.flags));
 		self->io_flags = self->tb.io.flags;
-	}
+	}*/
 
 	if (self->io_state != self->tb.io.state) {
 		printf("tbms.io.state: %s -> %s\n",
@@ -417,7 +398,7 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 	}
 	
 	if (tbms_tx_available(&self->tb)) {
-		printf("Sending: ");
+		printf("tbms.io.txbuf: ");
 
 		for (size_t i = 0; i < tbms_get_tx_len(&self->tb); i++)
 			printf("0x%02X ", tbms_get_tx_buf(&self->tb)[i]);
@@ -426,7 +407,7 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 	}
 	
 	if (self->io_state == TBMS_IO_STATE_RX_DONE) {
-		printf("Received: ");
+		printf("tbms.io.rxbuf: ");
 
 		for (size_t i = 0; i < self->tb.io.len; i++)
 			printf("0x%02X ", self->tb.io.buf[i]);
