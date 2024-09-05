@@ -42,6 +42,12 @@ enum tbms_io_state {
 	TBMS_IO_STATE_WAIT_FOR_SYSTEM
 };
 
+enum tbms_io_reply {
+	TBMS_IO_REPLY_NONE,
+	TBMS_IO_REPLY_OK,
+	TBMS_IO_REPLY_BAD
+};
+
 enum tbms_io_flag {
 	TBMS_IO_FLAG_NONE      = 0,
 	TBMS_IO_FLAG_TX_READY  = 1,
@@ -108,6 +114,17 @@ void tbms_io_packet(struct tbms_io *self)
 	self->state = TBMS_IO_STATE_WAIT_FOR_SEND;
 		
 	self->flags |= TBMS_IO_FLAG_TX_READY;
+}
+
+enum tbms_io_reply tbms_io_get_reply(struct tbms_io *self)
+{
+	if (self->state == TBMS_IO_STATE_IDLE)
+		return TBMS_IO_REPLY_BAD;
+
+	if (self->state == TBMS_IO_STATE_GOOD_REPLY)
+		return TBMS_IO_REPLY_OK;
+			
+	return TBMS_IO_REPLY_NONE;
 }
 
 void tbms_io_update(struct tbms_io *self)
@@ -285,43 +302,12 @@ void tbms_pop_task(struct tbms *self)
 	assert(self->tasks_len > 0);
 
 	self->tasks[0] = self->tasks[self->tasks_len--];
-}
-
-void tbms_discover(struct tbms *self)
-{
-	tbms_push_task(self, TBMS_COMMAND_DISCOVER);
-}
-
-void tbms_discover_task(struct tbms *self)
-{
-	static uint8_t cmd[] = {
-		0x3F << 1, //broadcast the reset task
-		0x3C,      //reset
-		0xA5       //data to cause a reset
-	};
-
-	static uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
-
-	tbms_io_init(&self->io, TBMS_IO_STATE_SEND_WITH_REPLY);
-	self->io.flags |= TBMS_IO_FLAG_REG_WRITE; //Write into register
 	
-	self->io.tx_buf = &cmd;
-	self->io.tx_len = sizeof(cmd);
-
-	self->io.rx_buf = &expected_reply;
-	self->io.rx_len = sizeof(expected_reply);
-
-	tbms_pop_task(self);
-	tbms_push_task(self, TBMS_COMMAND_SETUP_BOARDS);
+	self->state = 0;
 }
 
 void tbms_setup_boards_task(struct tbms *self)
 {
-	if (self->io.state == TBMS_IO_STATE_BAD_REPLY) {
-		tbms_pop_task(self);
-		return;
-	}
-	
 	static uint8_t cmd[] = {
 		0,
 		0, //read registers starting at 0
@@ -341,6 +327,49 @@ void tbms_setup_boards_task(struct tbms *self)
 	tbms_pop_task(self);
 }
 
+void tbms_discover(struct tbms *self)
+{
+	tbms_push_task(self, TBMS_COMMAND_DISCOVER);
+}
+
+void tbms_discover_task(struct tbms *self)
+{
+	static uint8_t cmd[] = {
+		0x3F << 1, //broadcast the reset task
+		0x3C,      //reset
+		0xA5       //data to cause a reset
+	};
+
+	static uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
+
+	switch (self->state) {
+	case 0:
+		tbms_io_init(&self->io, TBMS_IO_STATE_SEND_WITH_REPLY);
+		self->io.flags |= TBMS_IO_FLAG_REG_WRITE; //Write into register
+
+		self->io.tx_buf = &cmd;
+		self->io.tx_len = sizeof(cmd);
+
+		self->io.rx_buf = &expected_reply;
+		self->io.rx_len = sizeof(expected_reply);
+
+		self->state++;
+
+		break;
+
+	case 1:
+		if (tbms_io_get_reply(&self->io) == TBMS_IO_REPLY_NONE)
+			break;
+
+		tbms_pop_task(self);
+
+		if (tbms_io_get_reply(&self->io) == TBMS_IO_REPLY_OK)
+			tbms_push_task(self, TBMS_COMMAND_SETUP_BOARDS);
+
+		break;
+	}
+}
+
 //////////////////// UPDATE ////////////////////
 void tbms_update_timers(struct tbms *self, clock_t delta)
 {
@@ -352,11 +381,6 @@ void tbms_update(struct tbms *self, clock_t delta)
 	tbms_update_timers(self, delta);
 	
 	tbms_io_update(&self->io);
-	
-	//Return if any flags are active
-	if (self->io.state == TBMS_IO_STATE_WAIT_FOR_SYSTEM ||
-	    self->io.state != TBMS_IO_STATE_IDLE)
-		return;
 
 	//If no tasks - return;
 	if (!self->tasks_len)
@@ -390,13 +414,13 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 {
 	tbms_update(&self->tb, delta);
 
-	/*if (self->io_flags != self->tb.io.flags) {
+	if (self->io_flags != self->tb.io.flags) {
 		printf("tbms.io.flags: "
 			TBMS_IO_FLAGS_FMT" -> "TBMS_IO_FLAGS_FMT"\n",
 			TBMS_IO_GET_FLAG_NAMES(self->io_flags),
 			TBMS_IO_GET_FLAG_NAMES(self->tb.io.flags));
 		self->io_flags = self->tb.io.flags;
-	}*/
+	}
 
 	if (self->io_state != self->tb.io.state) {
 		printf("tbms.io.state: %s -> %s\n",
