@@ -33,7 +33,6 @@ uint8_t tbms_gen_crc(uint8_t *data, int len)
 ///////////////////////////////////////////////////////////////////////////////
 enum tbms_io_state {
 	TBMS_IO_STATE_IDLE,
-	TBMS_IO_STATE_SEND_WITH_REPLY,
 	TBMS_IO_STATE_WAIT_FOR_SEND,
 	TBMS_IO_STATE_WAIT_FOR_REPLY,
 	TBMS_IO_STATE_RX_DONE,
@@ -51,7 +50,6 @@ enum tbms_io_reply {
 enum tbms_io_flag {
 	TBMS_IO_FLAG_NONE      = 0,
 	TBMS_IO_FLAG_TX_READY  = 1,
-	TBMS_IO_FLAG_REG_WRITE = 2,
 	TBMS_IO_FLAG_RX_READY  = 4,
 	TBMS_IO_FLAG_TIMEOUT   = 8
 };
@@ -74,9 +72,9 @@ struct tbms_io {
 	clock_t timeout;
 };
 
-void tbms_io_init(struct tbms_io *self, enum tbms_io_state state)
+void tbms_io_init(struct tbms_io *self)
 {
-	self->state = state;
+	self->state = TBMS_IO_STATE_IDLE;
 
 	self->flags = TBMS_IO_FLAG_NONE;
 
@@ -93,7 +91,7 @@ void tbms_io_init(struct tbms_io *self, enum tbms_io_state state)
 	self->timeout = 100;
 }
 
-void tbms_io_packet(struct tbms_io *self)
+void tbms_io_add_packet(struct tbms_io *self, bool reg_write)
 {
 	assert(self->tx_len && self->tx_len < TBMS_MAX_IO_BUF);
 		
@@ -102,9 +100,7 @@ void tbms_io_packet(struct tbms_io *self)
 	self->len = self->tx_len;
 	
 	//Calculate CRC for register write operation
-	if (self->flags & TBMS_IO_FLAG_REG_WRITE) {
-		self->flags  &= ~TBMS_IO_FLAG_REG_WRITE;
-
+	if (reg_write) {
 		self->buf[0] |= 1;
 		self->buf[self->len] = tbms_gen_crc(self->buf, self->tx_len);
 
@@ -137,10 +133,6 @@ void tbms_io_update(struct tbms_io *self)
 	switch (self->state) {
 	case TBMS_IO_STATE_IDLE:
 		self->timer = 0;
-		return;
-	
-	case TBMS_IO_STATE_SEND_WITH_REPLY:
-		tbms_io_packet(self);
 		break;
 
 	case TBMS_IO_STATE_WAIT_FOR_SEND:
@@ -176,15 +168,13 @@ void tbms_io_update(struct tbms_io *self)
 		
 	case TBMS_IO_STATE_GOOD_REPLY:
 	case TBMS_IO_STATE_BAD_REPLY:
-		self->state = TBMS_IO_STATE_IDLE;
+		tbms_io_init(self);
 		break;
 
 	case TBMS_IO_STATE_WAIT_FOR_SYSTEM:
 		//Return to idle if flags were cleared by system
 		if (!self->flags)
-			self->state = TBMS_IO_STATE_IDLE;
-
-		break;
+			tbms_io_init(self);
 	}
 	
 	if (self->state == TBMS_IO_STATE_WAIT_FOR_REPLY)
@@ -197,7 +187,6 @@ char *tbms_io_get_state_name(uint8_t state)
 {
 	switch (state) {
 	case TBMS_IO_STATE_IDLE:            return "IDLE";
-	case TBMS_IO_STATE_SEND_WITH_REPLY: return "SEND_WITH_REPLY";
 	case TBMS_IO_STATE_WAIT_FOR_SEND:   return "WAIT_FOR_SEND";
 	case TBMS_IO_STATE_WAIT_FOR_REPLY:  return "WAIT_FOR_REPLY";
 	case TBMS_IO_STATE_RX_DONE:         return "RX_DONE";
@@ -209,12 +198,11 @@ char *tbms_io_get_state_name(uint8_t state)
 	return NULL;
 }
 
-#define TBMS_IO_FLAGS_FMT "%s%s%s%s%s"
+#define TBMS_IO_FLAGS_FMT "%s%s%s%s"
 
 #define TBMS_IO_GET_FLAG_NAMES(flags)                        \
 	flags == TBMS_IO_FLAG_NONE     ? "|NONE|"      : "", \
 	flags & TBMS_IO_FLAG_TX_READY  ? "|TX_READY|"  : "", \
-	flags & TBMS_IO_FLAG_REG_WRITE ? "|REG_WRITE|" : "", \
 	flags & TBMS_IO_FLAG_RX_READY  ? "|RX_READY|"  : "", \
 	flags & TBMS_IO_FLAG_TIMEOUT   ? "|TIMEOUT|"   : ""
 #endif //TBMS_DEBUG
@@ -249,7 +237,7 @@ void tbms_init(struct tbms *self)
 	self->tasks[0]  = TBMS_COMMAND_DISCOVER;
 	self->tasks_len = 1;
 	
-	tbms_io_init(&self->io, TBMS_IO_STATE_IDLE);
+	tbms_io_init(&self->io);
 }
 
 //////////////////// TX_RX ////////////////////
@@ -314,15 +302,15 @@ void tbms_setup_boards_task(struct tbms *self)
 		1  //read one byte
 	};
 
-	static uint8_t expected_reply[] = { 0x80, 0x00, 0x01, 0x61};
-
-	tbms_io_init(&self->io, TBMS_IO_STATE_SEND_WITH_REPLY);
+	static uint8_t expected_reply[] = { 0x80, 0x00, 0x01/*, 0x61*/};
 	
 	self->io.tx_buf = &cmd;
 	self->io.tx_len = sizeof(cmd);
 
 	self->io.rx_buf = &expected_reply;
 	self->io.rx_len = sizeof(expected_reply);
+
+	tbms_io_add_packet(&self->io, false);
 
 	tbms_pop_task(self);
 }
@@ -344,14 +332,13 @@ void tbms_discover_task(struct tbms *self)
 
 	switch (self->state) {
 	case 0:
-		tbms_io_init(&self->io, TBMS_IO_STATE_SEND_WITH_REPLY);
-		self->io.flags |= TBMS_IO_FLAG_REG_WRITE; //Write into register
-
 		self->io.tx_buf = &cmd;
 		self->io.tx_len = sizeof(cmd);
 
 		self->io.rx_buf = &expected_reply;
 		self->io.rx_len = sizeof(expected_reply);
+
+		tbms_io_add_packet(&self->io, true);
 
 		self->state++;
 

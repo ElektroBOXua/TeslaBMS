@@ -28,9 +28,11 @@ int main()
 	for (int i = 0; i < 200; i++)
 		update();
 
-	/* static uint8_t data[4] = {0x03, 0x30, 0x3D};
-	tbms_gen_request(data, 3);
+	//static uint8_t data[4] = {0x80, 0x00, 0x01};
+	//tbms_gen_request(data, 3);
 	
-	static uint8_t data2[4] = {0x7F, 0x3C, 0xA5};
-	tbms_gen_request(data2, 3); */
+	//printf("CRC: 0x%02X\n", tbms_gen_crc(data, 3));
+	
+	//static uint8_t data2[4] = {0x7F, 0x3C, 0xA5};
+	//tbms_gen_request(data2, 3);
 }
