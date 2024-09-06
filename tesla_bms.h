@@ -156,7 +156,7 @@ void tbms_io_update(struct tbms_io *self)
 
 //////////////////// DEBUG ////////////////////
 #ifdef   TBMS_DEBUG
-char *tbms_io_get_state_name(uint8_t state)
+const char *tbms_io_get_state_name(uint8_t state)
 {
 	switch (state) {
 	case TBMS_IO_STATE_IDLE:            return "IDLE";
@@ -291,14 +291,18 @@ async tbms_setup_boards_task(struct tbms *self)
 
 	tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_READ);
 
-	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 4, 0);
+	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 3, 0);
 		
-	uint8_t expected_reply[] = { 0x80, 0x00, 0x01/*, 0x??*/};
+	uint8_t expected_reply[] = { 0x80, 0x00, 0x01};
 
 	if (!tbms_validate_reply(self, expected_reply, 3))
 		ASYNC_RETURN(1);
+
+	//Skip bytes 0x61, 0x35 that appear after around 45us.
+	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 5, 0);
 	
 	tbms_io_rx_done(&self->io);
+	
 	ASYNC_YIELD(0);
 		
 	int i;
@@ -322,7 +326,7 @@ async tbms_setup_boards_task(struct tbms *self)
 	tbms_io_send(&self->io, cmd2, 3, TBMS_REG_MODE_WRITE);
 
 	//If 10 bytes received or 5 ms elapsed - continue
-	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 10 || self->io.timer >= 5, 0);
+	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 10 || self->io.timer >= 50, 0);
 
 	if (self->io.len < 3)
 		ASYNC_RETURN(1);

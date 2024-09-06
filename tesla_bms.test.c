@@ -1,3 +1,4 @@
+#ifndef ARDUINO
 #define TBMS_DEBUG
 #include "tesla_bms.h"
 
@@ -39,3 +40,4 @@ int main()
 	//static uint8_t data2[4] = {0x7F, 0x3C, 0xA5};
 	//tbms_gen_request(data2, 3);
 }
+#endif
