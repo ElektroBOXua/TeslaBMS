@@ -8,7 +8,7 @@
 //#define TBMS_DEBUG
 #define TBMS_MAX_MODULE_ADDR 0x3E
 #define TBMS_MAX_COMMANDS    20
-#define TBMS_MAX_IO_BUF      4
+#define TBMS_MAX_IO_BUF      10
 
 ///////////////////////////////////////////////////////////////////////////////
 uint8_t tbms_gen_crc(uint8_t *data, int len)
@@ -61,7 +61,7 @@ void tbms_io_init(struct tbms_io *self)
 {
 	self->state = TBMS_IO_STATE_IDLE;
 
-	self->ready = true;
+	self->ready = false;
 
 	//uint8_t buf[TBMS_MAX_IO_BUF];
 	self->len = 0;
@@ -86,8 +86,10 @@ void tbms_io_send(struct tbms_io *self, uint8_t *data, uint8_t len,
 
 		len++;
 	}
-
+	
 	self->state = TBMS_IO_STATE_WAIT_FOR_SEND;
+
+	self->ready = true;
 
 	self->len = len;
 }
@@ -174,6 +176,7 @@ enum tbms_task {
 
 struct tbms_module {
 	int8_t address; //1 to 0x3E
+	bool   exist;
 };
 
 struct tbms
@@ -186,6 +189,7 @@ struct tbms
 	struct tbms_io io;
 	
 	struct tbms_module modules[TBMS_MAX_MODULE_ADDR];
+	uint8_t mod_sel;
 };
 
 void tbms_init(struct tbms *self)
@@ -196,9 +200,14 @@ void tbms_init(struct tbms *self)
 	self->tasks_len = 1;
 	
 	tbms_io_init(&self->io);
+	
+	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++)
+		self->modules[i].exist = false;
+	
+	self->mod_sel = 0;
 }
 
-//////////////////// TX_RX ////////////////////
+//////////////////// RX TX ////////////////////
 bool tbms_tx_available(struct tbms *self)
 {
 	if (self->io.state == TBMS_IO_STATE_WAIT_FOR_SEND && self->io.ready)
@@ -280,19 +289,76 @@ void tbms_setup_boards_task(struct tbms *self)
 			break;
 		
 		uint8_t expected_reply[] = { 0x80, 0x00, 0x01/*, 0x??*/};
-
-		tbms_destroy_task(self);
 		
 		if (!memcmp(self->io.buf, expected_reply, 3))
 			tbms_io_rx_done(&self->io);
+		else
+			tbms_destroy_task(self);
+
+		self->mod_sel = 0;
+
+		self->state++;
+
+		break;
+
+	case 2: //Check if address is free to use
+		for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
+			if (!self->modules[i].exist) {
+				self->mod_sel = i;
+				
+				self->state++;
+				
+				return;
+			}
+		}
+		
+		tbms_destroy_task(self);
+		
+		break;
+		
+	case 3: {
+		uint8_t cmd[] = {
+			0,
+			0x3B, //REG_ADDR_CTRL
+			(self->mod_sel + 1) | 0x80
+		};
+
+		tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_WRITE);
+
+		self->io.timer = 0;
+
+		self->state++;
+			
+		break;
+	}
+	case 4: {
+		int len = tbms_io_recv(&self->io);
+	
+		//If 10 bytes received or 5 ms elapsed - continue
+		if (len < 10 && self->io.timer < 5)
+			break;
+		//If less than 3 bytes received - destroy task
+		if (len < 3) {
+			printf("len < 3\n");
+			tbms_destroy_task(self);
+			break;
+		}
+		
+		uint8_t expected_reply[] = { 
+			0x81, 0x3B, (self->mod_sel + 1) + 0x80/*, 0x??*/};
+
+		if (!memcmp(self->io.buf, expected_reply, 3)) {
+			self->modules[self->mod_sel].exist = true;
+			tbms_io_rx_done(&self->io);
+		} else {
+			tbms_destroy_task(self);
+		}
+		
+		self->state = 0;
 
 		break;
 	}
-}
-
-void tbms_discover(struct tbms *self)
-{
-	tbms_push_task(self, TBMS_TASK_DISCOVER);
+	}
 }
 
 void tbms_discover_task(struct tbms *self)
@@ -326,6 +392,12 @@ void tbms_discover_task(struct tbms *self)
 
 		break;
 	}
+}
+
+//////////////////// API ////////////////////
+void tbms_discover(struct tbms *self)
+{
+	tbms_push_task(self, TBMS_TASK_DISCOVER);
 }
 
 //////////////////// UPDATE ////////////////////
