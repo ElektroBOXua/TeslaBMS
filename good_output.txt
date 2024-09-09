@@ -1,0 +1,50 @@
+tbms.io.state: IDLE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x7F 0x3C 0xA5 0x57 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x7F 0x3C 0xA5 0x57 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x00 0x00 0x01 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x80 0x00 0x01 0x61 0x35 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x01 0x3B 0x81 0x8B 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x81 0x3B 0x81 0x8B 0x00 0x00 0x00 0x00 0x00 0x00 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x00 0x00 0x01 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x80 0x00 0x01 0x61 0x35 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x01 0x3B 0x82 0x82 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x81 0x3B 0x82 0x8B 0x00 0x00 0x00 0x00 0x00 0x00 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x00 0x00 0x01 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x7F 0x20 0xFF 0x7D 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x7F 0x20 0x00 0x8E 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x7F 0x21 0xFF 0x68 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+tbms.io.txbuf: 0x7F 0x21 0x00 0x9B 
+tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+tbms.io.state: RX_DONE -> IDLE
+2 modules detected!

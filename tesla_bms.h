@@ -5,29 +5,6 @@
 #include <stdio.h>
 #include <time.h>
 
-///////////////////////////////////////////////////////////////////////////////
-#include <stddef.h>
-
-typedef void * async;
-
-#define ASYNC_CAT1(a, b) a##b
-#define ASYNC_CAT(a, b) ASYNC_CAT1(a, b)
-
-#define async_dispatch(state) void **_state = &state; \
-			 if (*_state) { goto **_state; }
-
-/* DANGLING POINTER WARNING!
- * If there is a return statement between assignment and label,
- * compiler might think that anything after a return statement is unreachable
- * and may throw this warning. It's actually a false positive, so ignore it. */
-#define async_yield(act) do { *_state = &&ASYNC_CAT(_l, __LINE__); \
-			      act; ASYNC_CAT(_l, __LINE__) :; } while (0)
-#define async_await(cond, act) \
-			 do { async_yield(); if (!(cond)) { act; } } while (0)
-#define async_reset(act) do { *_state = NULL; act; } while (0)
-
-///////////////////////////////////////////////////////////////////////////////
-
 //#define TBMS_DEBUG
 #define TBMS_MAX_MODULE_ADDR 0x3E
 #define TBMS_MAX_COMMANDS    20
@@ -65,6 +42,27 @@ typedef void * async;
 #define TBMS_DATA_CLR_ZRO  0x00
 
 ///////////////////////////////////////////////////////////////////////////////
+#include <stddef.h>
+
+typedef void * async;
+
+#define ASYNC_CAT1(a, b) a##b
+#define ASYNC_CAT(a, b) ASYNC_CAT1(a, b)
+
+#define async_dispatch(state) void **_state = &state; \
+			 if (*_state) { goto **_state; }
+
+/* DANGLING POINTER WARNING!
+ * If there is a return statement between assignment and label,
+ * compiler might think that anything after a return statement is unreachable
+ * and may throw this warning. It's actually a false positive, so ignore it. */
+#define async_yield(act) do { *_state = &&ASYNC_CAT(_l, __LINE__); \
+			      act; ASYNC_CAT(_l, __LINE__) :; } while (0)
+#define async_await(cond, act) \
+			 do { async_yield(); if (!(cond)) { act; } } while (0)
+#define async_reset(act) do { *_state = NULL; act; } while (0)
+
+///////////////////////////////////////////////////////////////////////////////
 uint8_t tbms_gen_crc(uint8_t *data, int len)
 {
 	uint8_t generator = 0x07;
@@ -85,12 +83,6 @@ uint8_t tbms_gen_crc(uint8_t *data, int len)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-enum tbms_reg_mode {
-	TBMS_REG_MODE_READ  = 0,
-	TBMS_REG_MODE_WRITE = 1
-};
-
-///////////////////////////////////////////////////////////////////////////////
 enum tbms_io_state {
 	TBMS_IO_STATE_IDLE,
 	TBMS_IO_STATE_WAIT_FOR_SEND,
@@ -102,7 +94,7 @@ enum tbms_io_state {
 struct tbms_io {
 	enum tbms_io_state state;
 
-	async send_simple;
+	async send_state;
 
 	bool ready;
 
@@ -117,7 +109,7 @@ void tbms_io_init(struct tbms_io *self)
 {
 	self->state = TBMS_IO_STATE_IDLE;
 	
-	self->send_simple = 0;
+	self->send_state = 0;
 
 	self->ready = false;
 
@@ -130,107 +122,69 @@ void tbms_io_init(struct tbms_io *self)
 
 void tbms_io_reset(struct tbms_io *self)
 {
-	self->state = TBMS_IO_STATE_IDLE;
-
-	self->ready = false;
-
-	self->len = 0;
-	
-	self->timer = 0;
-	self->timeout = 100;
+	tbms_io_init(self);
 }
 
-void tbms_io_send(struct tbms_io *self, uint8_t *data, uint8_t len)
+bool tbms_io_recv(struct tbms_io *self, uint8_t expected_len)
 {
+	async_dispatch(self->send_state);
+	
+	self->len = 0;
+	self->state = TBMS_IO_STATE_WAIT_FOR_REPLY;
+	async_await((self->ready = true, self->len) >= expected_len,
+		    return false);
+	self->state = TBMS_IO_STATE_RX_DONE;
+	async_yield(return false); //To track state change
+
+	self->state = TBMS_IO_STATE_IDLE;
+
+	async_reset(return true);
+}
+
+bool tbms_io_send(struct tbms_io *self, uint8_t *data, uint8_t len,
+		  uint8_t expected_len)
+{
+	async_dispatch(self->send_state);
+	
 	assert(len && len < TBMS_MAX_IO_BUF);
-		
 	memcpy(self->buf, data, len);
 	
 	//Calculate CRC for register write operation
-	if (data[0] & TBMS_REG_MODE_WRITE) {
+	if (data[0] & TBMS_WRITE) {
 		self->buf[0] |= 1;
 		self->buf[len] = tbms_gen_crc(self->buf, len);
 
 		len++;
 	}
 	
-	self->state = TBMS_IO_STATE_WAIT_FOR_SEND;
-
 	self->ready = true;
-
 	self->len = len;
-
 	self->timer = 0;
-}
 
-uint8_t tbms_io_recv(struct tbms_io *self)
-{
-	if (self->state == TBMS_IO_STATE_WAIT_FOR_REPLY) {
-		self->ready = true;
-		return self->len;
-	}
-	
-	return 0;
-}
+	self->state = TBMS_IO_STATE_WAIT_FOR_SEND;
+	async_await(!self->ready, return false); //Wait for user to send
+	self->len = 0;
 
-void tbms_io_rx_done(struct tbms_io *self)
-{
-	if (self->state == TBMS_IO_STATE_WAIT_FOR_REPLY)
-		self->state = TBMS_IO_STATE_RX_DONE;
-}
+	self->state = TBMS_IO_STATE_WAIT_FOR_REPLY;
+	async_yield(return false); //To track state change
+	async_await((self->ready = true, self->len) >= expected_len,
+		    return false);
 
+	self->state = TBMS_IO_STATE_RX_DONE;
+	async_yield(return false); //To track state change
 
-int tbms_io_send_simple(struct tbms_io *self, uint8_t *data, uint8_t len,
-			uint8_t expected_len)
-{
-	async_dispatch(self->send_simple);
-	
-	tbms_io_send(self, data, len);
-	async_await(tbms_io_recv(self) >= expected_len, return 0);
-	tbms_io_rx_done(self);
-	
-	//Yield to track state change between upldates (DEBUG)
-	async_yield(return 0);
+	self->state = TBMS_IO_STATE_IDLE;
 
-	async_reset(return 1);
+	async_reset(return true);
 }
 
 void tbms_io_update(struct tbms_io *self)
 {
-	switch (self->state) {
-	case TBMS_IO_STATE_IDLE:
+	if (self->state == TBMS_IO_STATE_TIMEOUT)
+		tbms_io_reset(self);
+		
+	if (!self->send_state)
 		self->timer = 0;
-
-		break;
-
-	case TBMS_IO_STATE_WAIT_FOR_SEND:
-		if (self->ready)
-			break;
-
-		self->state = TBMS_IO_STATE_WAIT_FOR_REPLY;
-		
-		self->len = 0;
-
-		break;
-
-	case TBMS_IO_STATE_WAIT_FOR_REPLY:
-		if (!self->ready)
-			break;
-
-		self->ready = false;
-		
-		break;
-	
-	case TBMS_IO_STATE_RX_DONE:
-		tbms_io_reset(self);
-
-		break;
-	
-	case TBMS_IO_STATE_TIMEOUT:
-		tbms_io_reset(self);
-
-		break;
-	}
 
 	if (self->timer >= self->timeout)
 		self->state = TBMS_IO_STATE_TIMEOUT;
@@ -376,22 +330,22 @@ int tbms_clear_faults_task(struct tbms *self)
 	//Select all TBMS_REG_ALERT_STATUS status bits	
 	uint8_t cmd0[] = {TBMS_BROADCAST, TBMS_REG_ALERT_STATUS,
 			  TBMS_DATA_SEL_ALL };
-	async_await(tbms_io_send_simple(&self->io, cmd0, 3, 4), return 0);
+	async_await(tbms_io_send(&self->io, cmd0, 3, 4), return 0);
 
 	//Clear all TBMS_REG_ALERT_STATUS status bits
 	uint8_t cmd1[] = {TBMS_BROADCAST, TBMS_REG_ALERT_STATUS,
 			  TBMS_DATA_CLR_ZRO };
-	async_await(tbms_io_send_simple(&self->io, cmd1, 3, 4), return 0);
+	async_await(tbms_io_send(&self->io, cmd1, 3, 4), return 0);
 
 	//Select all TBMS_REG_FAULT_STATUS status bits	
 	uint8_t cmd2[] = {TBMS_BROADCAST, TBMS_REG_FAULT_STATUS,
 			  TBMS_DATA_SEL_ALL };
-	async_await(tbms_io_send_simple(&self->io, cmd2, 3, 4), return 0);
+	async_await(tbms_io_send(&self->io, cmd2, 3, 4), return 0);
 
 	//Clear all TBMS_REG_FAULT_STATUS status bits
  	uint8_t cmd3[] = {TBMS_BROADCAST, TBMS_REG_FAULT_STATUS,
 			  TBMS_DATA_CLR_ZRO };
-	async_await(tbms_io_send_simple(&self->io, cmd3, 3, 4), return 0);
+	async_await(tbms_io_send(&self->io, cmd3, 3, 4), return 0);
 
 	self->clear_faults = false;
 
@@ -404,17 +358,14 @@ int tbms_setup_boards_task(struct tbms *self)
 
 	uint8_t cmd[] = { TBMS_READ, TBMS_REG_DEV_STATUS, 1 };
 
-	tbms_io_send(&self->io, cmd, 3);
-	async_await(tbms_io_recv(&self->io) >= 3, return 0);
+	async_await(tbms_io_send(&self->io, cmd, 3, 3), return 0);
 
 	uint8_t expected_reply[] = { 0x80, 0x00, 0x01};
 	if (!tbms_validate_reply(self, expected_reply, 3))
 		async_reset(return 1);
 
 	//Skip bytes 0x61, 0x35 that appear after around 45us.
-	async_await(tbms_io_recv(&self->io) >= 5, return 0);
-	tbms_io_rx_done(&self->io);
-	async_yield(return 0);
+	async_await(tbms_io_recv(&self->io, 2), return 0);
 
 	int i;
 	
@@ -432,11 +383,8 @@ int tbms_setup_boards_task(struct tbms *self)
 		(uint8_t)((self->mod_sel + 1) | 0x80)
 	};
 
-	tbms_io_send(&self->io, cmd2, 3);
-
-	//If 10 bytes received or 50 ms elapsed - continue
-	async_await(tbms_io_recv(&self->io) >= 10 || self->io.timer >= 50,
-		    return 0);
+	async_await(tbms_io_send(&self->io, cmd2, 3, 10) ||
+		    self->io.timer >= 50, return 0);
 
 	if (self->io.len < 3)
 		async_reset(return 1);
@@ -447,8 +395,6 @@ int tbms_setup_boards_task(struct tbms *self)
 
 	if (!tbms_validate_reply(self, expected_reply2, 3))
 		async_reset(return 1);
-
-	tbms_io_rx_done(&self->io);
 
 	self->modules[self->mod_sel].exist = true;
 	self->modules_count++;
@@ -463,17 +409,12 @@ int tbms_discover_task(struct tbms *self)
 
 	uint8_t cmd[] = { TBMS_BROADCAST, TBMS_REG_RESET, 0xA5 };
 			
-	tbms_io_send(&self->io, cmd, 3);
-
-	//Await until received 4 bytes
-	async_await(tbms_io_recv(&self->io) >= 4, return 0);
+	async_await(tbms_io_send(&self->io, cmd, 3, 4), return 0);
 
 	uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
 
 	if (tbms_validate_reply(self, expected_reply, 4))
 		tbms_push_task(self, TBMS_TASK_SETUP_BOARDS);
-
-	tbms_io_rx_done(&self->io);
 
 	async_reset(return 1);
 }
@@ -496,6 +437,8 @@ void tbms_update(struct tbms *self, clock_t delta)
 		//If no modules - run discovery
 		if (self->modules_count == 0)
 			tbms_push_task(self, TBMS_TASK_DISCOVER);
+		
+		return;
 	}
 
 	//If no tasks - return;
@@ -569,6 +512,7 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 
 	if (self->io_state != self->tb.io.state) {
 		printf("[% 3i] tbms.io.state: %s -> %s\n", (int)self->timestamp,
+		//printf("tbms.io.state: %s -> %s\n",
 			tbms_io_get_state_name(self->io_state),
 			tbms_io_get_state_name(self->tb.io.state));
 		self->io_state = self->tb.io.state;	
@@ -576,6 +520,7 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 	
 	if (tbms_tx_available(&self->tb)) {
 		printf("[% 3i] tbms.io.txbuf: ", (int)self->timestamp);
+		//printf("tbms.io.txbuf: ");
 
 		for (size_t i = 0; i < tbms_get_tx_len(&self->tb); i++)
 			printf("0x%02X ", tbms_get_tx_buf(&self->tb)[i]);
@@ -586,6 +531,7 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 	if (self->io_state == TBMS_IO_STATE_RX_DONE ||
 	    self->io_state == TBMS_IO_STATE_TIMEOUT) {
 		printf("[% 3i] tbms.io.rxbuf: ", (int)self->timestamp);
+		//printf("tbms.io.rxbuf: ");
 
 		for (size_t i = 0; i < self->tb.io.len; i++)
 			printf("0x%02X ", self->tb.io.buf[i]);
