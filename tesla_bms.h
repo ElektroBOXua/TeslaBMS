@@ -15,8 +15,13 @@ typedef void * async;
 
 #define async_dispatch(state) void **_state = &state; \
 			 if (*_state) { goto **_state; }
+
+/* DANGLING POINTER WARNING!
+ * If there is a return statement between assignment and label,
+ * compiler might think that anything after a return statement is unreachable
+ * and may throw this warning. It's actually a false positive, so ignore it. */
 #define async_yield(act) do { *_state = &&ASYNC_CAT(_l, __LINE__); \
-			      act; ASYNC_CAT(_l, __LINE__) : } while (0)
+			      act; ASYNC_CAT(_l, __LINE__) :; } while (0)
 #define async_await(cond, act) \
 			 do { async_yield(); if (!(cond)) { act; } } while (0)
 #define async_reset(act) do { *_state = NULL; act; } while (0)
@@ -126,7 +131,7 @@ uint8_t tbms_io_recv(struct tbms_io *self)
 
 void tbms_io_rx_done(struct tbms_io *self)
 {
-	if (TBMS_IO_STATE_WAIT_FOR_REPLY)
+	if (self->state == TBMS_IO_STATE_WAIT_FOR_REPLY)
 		self->state = TBMS_IO_STATE_RX_DONE;
 }
 
@@ -340,7 +345,7 @@ int tbms_setup_boards_task(struct tbms *self)
 	uint8_t cmd2[] = {
 		0,
 		0x3B, //REG_ADDR_CTRL
-		(self->mod_sel + 1) | 0x80
+		(uint8_t)((self->mod_sel + 1) | 0x80)
 	};
 
 	tbms_io_send(&self->io, cmd2, 3, TBMS_REG_MODE_WRITE);
@@ -353,7 +358,7 @@ int tbms_setup_boards_task(struct tbms *self)
 		async_reset(return 1);
 
 	uint8_t expected_reply2[] = { 
-		0x81, 0x3B, (self->mod_sel + 1) + 0x80/*, 0x??*/};
+		0x81, 0x3B, (uint8_t)((self->mod_sel + 1) + 0x80)/*, 0x??*/};
 
 	if (!tbms_validate_reply(self, expected_reply2, 3))
 		async_reset(return 1);
@@ -392,7 +397,6 @@ int tbms_discover_task(struct tbms *self)
 	async_reset(return 1);
 }
 
-//////////////////// API ////////////////////
 void tbms_discover(struct tbms *self)
 {
 	tbms_push_task(self, TBMS_TASK_DISCOVER);
