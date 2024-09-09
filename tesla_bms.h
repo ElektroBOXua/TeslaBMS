@@ -34,8 +34,8 @@ typedef void * async;
 #define TBMS_MAX_IO_BUF      20
 
 ///////////////////////////////////////////////////////////////////////////////
-#define TBMS_READ_REG   0x00
-#define TBMS_WRITE_REG  0x01
+#define TBMS_READ       0x00
+#define TBMS_WRITE      0x01
 #define TBMS_BROADCAST  0x7F
 #define TBMS_MODULE(n)  (n << 1)
 
@@ -59,6 +59,7 @@ typedef void * async;
 #define TBMS_REG_BAL_TIME        0x33
 #define TBMS_REG_ADC_CONV        0x34
 #define TBMS_REG_ADDR_CTRL       0x3B
+#define TBMS_REG_RESET           0x3C
 
 #define TBMS_DATA_SEL_ALL  0xFF
 #define TBMS_DATA_CLR_ZRO  0x00
@@ -139,15 +140,14 @@ void tbms_io_reset(struct tbms_io *self)
 	self->timeout = 100;
 }
 
-void tbms_io_send(struct tbms_io *self, uint8_t *data, uint8_t len,
-		    enum tbms_reg_mode mode)
+void tbms_io_send(struct tbms_io *self, uint8_t *data, uint8_t len)
 {
 	assert(len && len < TBMS_MAX_IO_BUF);
 		
 	memcpy(self->buf, data, len);
 	
 	//Calculate CRC for register write operation
-	if (mode == TBMS_REG_MODE_WRITE) {
+	if (data[0] & TBMS_REG_MODE_WRITE) {
 		self->buf[0] |= 1;
 		self->buf[len] = tbms_gen_crc(self->buf, len);
 
@@ -181,11 +181,11 @@ void tbms_io_rx_done(struct tbms_io *self)
 
 
 int tbms_io_send_simple(struct tbms_io *self, uint8_t *data, uint8_t len,
-			 enum tbms_reg_mode mode, uint8_t expected_len)
+			uint8_t expected_len)
 {
 	async_dispatch(self->send_simple);
 	
-	tbms_io_send(self, data, len, mode);
+	tbms_io_send(self, data, len);
 	async_await(tbms_io_recv(self) >= expected_len, return 0);
 	tbms_io_rx_done(self);
 	
@@ -373,29 +373,25 @@ int tbms_clear_faults_task(struct tbms *self)
 {
 	async_dispatch(self->state);
 	
-	//Select ALL TBMS_REG_ALERT_STATUS alert status bits	
+	//Select all TBMS_REG_ALERT_STATUS status bits	
 	uint8_t cmd0[] = {TBMS_BROADCAST, TBMS_REG_ALERT_STATUS,
 			  TBMS_DATA_SEL_ALL };
-	async_await(tbms_io_send_simple(&self->io, cmd0, 3,
-		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
+	async_await(tbms_io_send_simple(&self->io, cmd0, 3, 4), return 0);
 
-	//Clear ALL TBMS_REG_ALERT_STATUS status bits
+	//Clear all TBMS_REG_ALERT_STATUS status bits
 	uint8_t cmd1[] = {TBMS_BROADCAST, TBMS_REG_ALERT_STATUS,
 			  TBMS_DATA_CLR_ZRO };
-	async_await(tbms_io_send_simple(&self->io, cmd1, 3,
-		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
+	async_await(tbms_io_send_simple(&self->io, cmd1, 3, 4), return 0);
 
-	//Select ALL TBMS_REG_FAULT_STATUS alert status bits	
+	//Select all TBMS_REG_FAULT_STATUS status bits	
 	uint8_t cmd2[] = {TBMS_BROADCAST, TBMS_REG_FAULT_STATUS,
 			  TBMS_DATA_SEL_ALL };
-	async_await(tbms_io_send_simple(&self->io, cmd2, 3,
-		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
+	async_await(tbms_io_send_simple(&self->io, cmd2, 3, 4), return 0);
 
-	//Clear ALL TBMS_REG_FAULT_STATUS status bits
+	//Clear all TBMS_REG_FAULT_STATUS status bits
  	uint8_t cmd3[] = {TBMS_BROADCAST, TBMS_REG_FAULT_STATUS,
 			  TBMS_DATA_CLR_ZRO };
-	async_await(tbms_io_send_simple(&self->io, cmd3, 3,
-		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
+	async_await(tbms_io_send_simple(&self->io, cmd3, 3, 4), return 0);
 
 	self->clear_faults = false;
 
@@ -406,9 +402,9 @@ int tbms_setup_boards_task(struct tbms *self)
 {
 	async_dispatch(self->state);
 
-	uint8_t cmd[] = { TBMS_READ_REG, TBMS_REG_DEV_STATUS, 1 };
+	uint8_t cmd[] = { TBMS_READ, TBMS_REG_DEV_STATUS, 1 };
 
-	tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_READ);
+	tbms_io_send(&self->io, cmd, 3);
 	async_await(tbms_io_recv(&self->io) >= 3, return 0);
 
 	uint8_t expected_reply[] = { 0x80, 0x00, 0x01};
@@ -432,13 +428,11 @@ int tbms_setup_boards_task(struct tbms *self)
 	if (i >= TBMS_MAX_MODULE_ADDR)
 		async_reset(return 1);
 
-	uint8_t cmd2[] = {
-		0,
-		TBMS_REG_ADDR_CTRL,
+	uint8_t cmd2[] = { TBMS_WRITE, TBMS_REG_ADDR_CTRL,
 		(uint8_t)((self->mod_sel + 1) | 0x80)
 	};
 
-	tbms_io_send(&self->io, cmd2, 3, TBMS_REG_MODE_WRITE);
+	tbms_io_send(&self->io, cmd2, 3);
 
 	//If 10 bytes received or 50 ms elapsed - continue
 	async_await(tbms_io_recv(&self->io) >= 10 || self->io.timer >= 50,
@@ -467,13 +461,9 @@ int tbms_discover_task(struct tbms *self)
 {
 	async_dispatch(self->state);
 
-	uint8_t cmd[] = {
-		0x3F << 1, //broadcast the reset task
-		0x3C,      //reset
-		0xA5       //data to cause a reset
-	};
+	uint8_t cmd[] = { TBMS_BROADCAST, TBMS_REG_RESET, 0xA5 };
 			
-	tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_WRITE);
+	tbms_io_send(&self->io, cmd, 3);
 
 	//Await until received 4 bytes
 	async_await(tbms_io_recv(&self->io) >= 4, return 0);
@@ -488,16 +478,6 @@ int tbms_discover_task(struct tbms *self)
 	async_reset(return 1);
 }
 
-void tbms_clear_faults(struct tbms *self)
-{
-	tbms_push_task(self, TBMS_TASK_CLEAR_FAULTS);
-}
-
-void tbms_discover(struct tbms *self)
-{
-	tbms_push_task(self, TBMS_TASK_DISCOVER);
-}
-
 //////////////////// UPDATE ////////////////////
 void tbms_update_timers(struct tbms *self, clock_t delta)
 {
@@ -507,7 +487,6 @@ void tbms_update_timers(struct tbms *self, clock_t delta)
 void tbms_update(struct tbms *self, clock_t delta)
 {
 	tbms_update_timers(self, delta);
-	
 	tbms_io_update(&self->io);
 
 	//Remove current task if IO had timeout.
@@ -516,16 +495,16 @@ void tbms_update(struct tbms *self, clock_t delta)
 		
 		//If no modules - run discovery
 		if (self->modules_count == 0)
-			tbms_discover(self);
+			tbms_push_task(self, TBMS_TASK_DISCOVER);
 	}
 
 	//If no tasks - return;
 	if (!self->tasks_len) {
 		//If no modules - run discovery
 		if (self->modules_count == 0)
-			tbms_discover(self);
+			tbms_push_task(self, TBMS_TASK_DISCOVER);
 		else if (self->clear_faults)
-			tbms_clear_faults(self);
+			tbms_push_task(self, TBMS_TASK_CLEAR_FAULTS);
 			
 		return;
 	}
@@ -542,6 +521,17 @@ void tbms_update(struct tbms *self, clock_t delta)
 		tbms_destroy_task(self);
 	}
 }
+
+//////////////////// API ////////////////////
+/*void tbms_clear_faults(struct tbms *self)
+{
+	
+}
+
+void tbms_discover(struct tbms *self)
+{
+	
+}*/
 
 //////////////////// DEBUG ////////////////////
 #ifdef   TBMS_DEBUG
