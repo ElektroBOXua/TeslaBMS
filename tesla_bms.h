@@ -34,8 +34,10 @@ typedef void * async;
 #define TBMS_MAX_IO_BUF      20
 
 ///////////////////////////////////////////////////////////////////////////////
-#define TBMS_CMD_READ_REG  0x00
-#define TBMS_CMD_BROADCAST 0x7F
+#define TBMS_READ_REG   0x00
+#define TBMS_WRITE_REG  0x01
+#define TBMS_BROADCAST  0x7F
+#define TBMS_MODULE(n)  (n << 1)
 
 #define TBMS_REG_DEV_STATUS      0
 #define TBMS_REG_GPAI            1
@@ -372,25 +374,25 @@ int tbms_clear_faults_task(struct tbms *self)
 	async_dispatch(self->state);
 	
 	//Select ALL TBMS_REG_ALERT_STATUS alert status bits	
-	uint8_t cmd0[] = {TBMS_CMD_BROADCAST, TBMS_REG_ALERT_STATUS,
+	uint8_t cmd0[] = {TBMS_BROADCAST, TBMS_REG_ALERT_STATUS,
 			  TBMS_DATA_SEL_ALL };
 	async_await(tbms_io_send_simple(&self->io, cmd0, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
 
 	//Clear ALL TBMS_REG_ALERT_STATUS status bits
-	uint8_t cmd1[] = {TBMS_CMD_BROADCAST, TBMS_REG_ALERT_STATUS,
+	uint8_t cmd1[] = {TBMS_BROADCAST, TBMS_REG_ALERT_STATUS,
 			  TBMS_DATA_CLR_ZRO };
 	async_await(tbms_io_send_simple(&self->io, cmd1, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
 
 	//Select ALL TBMS_REG_FAULT_STATUS alert status bits	
-	uint8_t cmd2[] = {TBMS_CMD_BROADCAST, TBMS_REG_FAULT_STATUS,
+	uint8_t cmd2[] = {TBMS_BROADCAST, TBMS_REG_FAULT_STATUS,
 			  TBMS_DATA_SEL_ALL };
 	async_await(tbms_io_send_simple(&self->io, cmd2, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
 
 	//Clear ALL TBMS_REG_FAULT_STATUS status bits
- 	uint8_t cmd3[] = {TBMS_CMD_BROADCAST, TBMS_REG_FAULT_STATUS,
+ 	uint8_t cmd3[] = {TBMS_BROADCAST, TBMS_REG_FAULT_STATUS,
 			  TBMS_DATA_CLR_ZRO };
 	async_await(tbms_io_send_simple(&self->io, cmd3, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
@@ -404,26 +406,22 @@ int tbms_setup_boards_task(struct tbms *self)
 {
 	async_dispatch(self->state);
 
-	uint8_t cmd[] = { TBMS_CMD_READ_REG, TBMS_REG_DEV_STATUS, 1 };
+	uint8_t cmd[] = { TBMS_READ_REG, TBMS_REG_DEV_STATUS, 1 };
 
 	tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_READ);
-
 	async_await(tbms_io_recv(&self->io) >= 3, return 0);
 
 	uint8_t expected_reply[] = { 0x80, 0x00, 0x01};
-
 	if (!tbms_validate_reply(self, expected_reply, 3))
 		async_reset(return 1);
 
 	//Skip bytes 0x61, 0x35 that appear after around 45us.
 	async_await(tbms_io_recv(&self->io) >= 5, return 0);
-
 	tbms_io_rx_done(&self->io);
-
 	async_yield(return 0);
 
 	int i;
-
+	
 	for (i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
 		if (!self->modules[i].exist) {
 			self->mod_sel = i;
