@@ -4,12 +4,29 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
-#include "async.h"
+
+///////////////////////////////////////////////////////////////////////////////
+#include <stddef.h>
+
+typedef void * async;
+
+#define ASYNC_CAT1(a, b) a##b
+#define ASYNC_CAT(a, b) ASYNC_CAT1(a, b)
+
+#define async_dispatch(state) void **_state = &state; \
+			 if (*_state) { goto **_state; }
+#define async_yield(act) do { *_state = &&ASYNC_CAT(_l, __LINE__); \
+			      act; ASYNC_CAT(_l, __LINE__) : } while (0)
+#define async_await(cond, act) \
+			 do { async_yield(); if (!(cond)) { act; } } while (0)
+#define async_reset(act) do { *_state = NULL; act; } while (0)
+
+///////////////////////////////////////////////////////////////////////////////
 
 //#define TBMS_DEBUG
 #define TBMS_MAX_MODULE_ADDR 0x3E
 #define TBMS_MAX_COMMANDS    20
-#define TBMS_MAX_IO_BUF      10
+#define TBMS_MAX_IO_BUF      20
 
 ///////////////////////////////////////////////////////////////////////////////
 uint8_t tbms_gen_crc(uint8_t *data, int len)
@@ -109,8 +126,8 @@ uint8_t tbms_io_recv(struct tbms_io *self)
 
 void tbms_io_rx_done(struct tbms_io *self)
 {
-	assert(self->state == TBMS_IO_STATE_WAIT_FOR_REPLY);
-	self->state = TBMS_IO_STATE_RX_DONE;
+	if (TBMS_IO_STATE_WAIT_FOR_REPLY)
+		self->state = TBMS_IO_STATE_RX_DONE;
 }
 
 void tbms_io_update(struct tbms_io *self)
@@ -190,8 +207,11 @@ struct tbms
 	int tasks_len;
 	
 	struct tbms_io io;
-	
+
+	bool discovery_pending;
+
 	struct tbms_module modules[TBMS_MAX_MODULE_ADDR];
+	uint8_t modules_count;
 	uint8_t mod_sel;
 };
 
@@ -206,7 +226,7 @@ void tbms_init(struct tbms *self)
 	
 	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++)
 		self->modules[i].exist = false;
-	
+	self->modules_count = 0;
 	self->mod_sel = 0;
 }
 
@@ -279,9 +299,9 @@ bool tbms_validate_reply(struct tbms *self, uint8_t *reply, uint8_t len)
 		return false;
 }
 
-async tbms_setup_boards_task(struct tbms *self)
+int tbms_setup_boards_task(struct tbms *self)
 {
-	ASYNC_DISPATCH(self->state);
+	async_dispatch(self->state);
 
 	uint8_t cmd[] = {
 		0,
@@ -291,22 +311,22 @@ async tbms_setup_boards_task(struct tbms *self)
 
 	tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_READ);
 
-	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 3, 0);
-		
+	async_await(tbms_io_recv(&self->io) >= 3, return 0);
+
 	uint8_t expected_reply[] = { 0x80, 0x00, 0x01};
 
 	if (!tbms_validate_reply(self, expected_reply, 3))
-		ASYNC_RETURN(1);
+		async_reset(return 1);
 
 	//Skip bytes 0x61, 0x35 that appear after around 45us.
-	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 5, 0);
-	
+	async_await(tbms_io_recv(&self->io) >= 5, return 0);
+
 	tbms_io_rx_done(&self->io);
-	
-	ASYNC_YIELD(0);
-		
+
+	async_yield(return 0);
+
 	int i;
-	
+
 	for (i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
 		if (!self->modules[i].exist) {
 			self->mod_sel = i;
@@ -315,7 +335,7 @@ async tbms_setup_boards_task(struct tbms *self)
 	}
 
 	if (i >= TBMS_MAX_MODULE_ADDR)
-		ASYNC_RETURN(1);
+		async_reset(return 1);
 
 	uint8_t cmd2[] = {
 		0,
@@ -325,27 +345,31 @@ async tbms_setup_boards_task(struct tbms *self)
 
 	tbms_io_send(&self->io, cmd2, 3, TBMS_REG_MODE_WRITE);
 
-	//If 10 bytes received or 5 ms elapsed - continue
-	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 10 || self->io.timer >= 50, 0);
+	//If 10 bytes received or 50 ms elapsed - continue
+	async_await(tbms_io_recv(&self->io) >= 10 || self->io.timer >= 50,
+		    return 0);
 
 	if (self->io.len < 3)
-		ASYNC_RETURN(1);
-		
+		async_reset(return 1);
+
 	uint8_t expected_reply2[] = { 
 		0x81, 0x3B, (self->mod_sel + 1) + 0x80/*, 0x??*/};
 
 	if (!tbms_validate_reply(self, expected_reply2, 3))
-		ASYNC_RETURN(1);
+		async_reset(return 1);
 
 	tbms_io_rx_done(&self->io);
 
+	self->modules[self->mod_sel].exist = true;
+	self->modules_count++;
+
 	//Repeat if task not yet destroyed
-	ASYNC_RETURN(0);
+	async_reset(return 0);
 }
 
-async tbms_discover_task(struct tbms *self)
+int tbms_discover_task(struct tbms *self)
 {
-	ASYNC_DISPATCH(self->state);
+	async_dispatch(self->state);
 
 	uint8_t cmd[] = {
 		0x3F << 1, //broadcast the reset task
@@ -356,7 +380,7 @@ async tbms_discover_task(struct tbms *self)
 	tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_WRITE);
 
 	//Await until received 4 bytes
-	ASYNC_AWAIT(tbms_io_recv(&self->io) >= 4, 0);
+	async_await(tbms_io_recv(&self->io) >= 4, return 0);
 
 	uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
 
@@ -365,7 +389,7 @@ async tbms_discover_task(struct tbms *self)
 
 	tbms_io_rx_done(&self->io);
 
-	ASYNC_RETURN(1);
+	async_reset(return 1);
 }
 
 //////////////////// API ////////////////////
@@ -387,22 +411,33 @@ void tbms_update(struct tbms *self, clock_t delta)
 	tbms_io_update(&self->io);
 
 	//Remove current task if IO had timeout.
-	if (self->io.state == TBMS_IO_STATE_TIMEOUT)
+	if (self->io.state == TBMS_IO_STATE_TIMEOUT) {
 		tbms_destroy_task(self);
-	
-	//If no tasks - return;
-	if (!self->tasks_len)
-		return;
+		
+		//If no modules - run discovery
+		if (self->modules_count == 0)
+			tbms_discover(self);
+	}
 
-	async ev = 0;
+	//If no tasks - return;
+	if (!self->tasks_len) {
+		//If no modules - run discovery
+		if (self->modules_count == 0)
+			tbms_discover(self);
+			
+		return;
+	}
+	
+	int ev = 0;
 
 	switch (self->tasks[0]) {
 	case TBMS_TASK_DISCOVER:     ev = tbms_discover_task(self); break;
 	case TBMS_TASK_SETUP_BOARDS: ev = tbms_setup_boards_task(self); break;
 	}
 	
-	if (ev == 1)
+	if (ev == 1) {
 		tbms_destroy_task(self);
+	}
 }
 
 //////////////////// DEBUG ////////////////////
@@ -451,7 +486,8 @@ void tbms_update_debug(struct tbms_debug *self, clock_t delta)
 		printf("\n");
 	}
 	
-	if (self->io_state == TBMS_IO_STATE_RX_DONE) {
+	if (self->io_state == TBMS_IO_STATE_RX_DONE ||
+	    self->io_state == TBMS_IO_STATE_TIMEOUT) {
 		printf("tbms.io.rxbuf: ");
 
 		for (size_t i = 0; i < self->tb.io.len; i++)
