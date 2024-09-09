@@ -39,7 +39,7 @@ int main()
 	for (int i = 0; i < 2000; i++)
 		update();
 
-	printf("%i modules exist!\n", tb.tb.modules_count);
+	printf("%i modules detected!\n", tb.tb.modules_count);
 
 	//static uint8_t data[4] = {0x80, 0x00, 0x01};
 	//tbms_gen_request(data, 3);
