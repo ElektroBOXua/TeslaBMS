@@ -34,6 +34,9 @@ typedef void * async;
 #define TBMS_MAX_IO_BUF      20
 
 ///////////////////////////////////////////////////////////////////////////////
+#define TBMS_CMD_READ_REG  0x00
+#define TBMS_CMD_BROADCAST 0x7F
+
 #define TBMS_REG_DEV_STATUS      0
 #define TBMS_REG_GPAI            1
 #define TBMS_REG_VCELL1          3
@@ -54,6 +57,9 @@ typedef void * async;
 #define TBMS_REG_BAL_TIME        0x33
 #define TBMS_REG_ADC_CONV        0x34
 #define TBMS_REG_ADDR_CTRL       0x3B
+
+#define TBMS_DATA_SEL_ALL  0xFF
+#define TBMS_DATA_CLR_ZRO  0x00
 
 ///////////////////////////////////////////////////////////////////////////////
 uint8_t tbms_gen_crc(uint8_t *data, int len)
@@ -363,32 +369,30 @@ bool tbms_validate_reply(struct tbms *self, uint8_t *reply, uint8_t len)
 
 int tbms_clear_faults_task(struct tbms *self)
 {
-	uint8_t payload[3];
-
 	async_dispatch(self->state);
-		
-	payload[0] = 0x7F; //broadcast
-	payload[1] = TBMS_REG_ALERT_STATUS;
-	payload[2] = 0xFF; //data to cause a reset
-	async_await(tbms_io_send_simple(&self->io, payload, 3,
+	
+	//Select ALL TBMS_REG_ALERT_STATUS alert status bits	
+	uint8_t cmd0[] = {TBMS_CMD_BROADCAST, TBMS_REG_ALERT_STATUS,
+			  TBMS_DATA_SEL_ALL };
+	async_await(tbms_io_send_simple(&self->io, cmd0, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
 
-        payload[0] = 0x7F; //broadcast
-	payload[1] = TBMS_REG_ALERT_STATUS;
-        payload[2] = 0x00;//data to clear
-	async_await(tbms_io_send_simple(&self->io, payload, 3,
+	//Clear ALL TBMS_REG_ALERT_STATUS status bits
+	uint8_t cmd1[] = {TBMS_CMD_BROADCAST, TBMS_REG_ALERT_STATUS,
+			  TBMS_DATA_CLR_ZRO };
+	async_await(tbms_io_send_simple(&self->io, cmd1, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
 
-        payload[0] = 0x7F; //broadcast
-        payload[1] = TBMS_REG_FAULT_STATUS;
-        payload[2] = 0xFF;//data to cause a reset
-	async_await(tbms_io_send_simple(&self->io, payload, 3,
+	//Select ALL TBMS_REG_FAULT_STATUS alert status bits	
+	uint8_t cmd2[] = {TBMS_CMD_BROADCAST, TBMS_REG_FAULT_STATUS,
+			  TBMS_DATA_SEL_ALL };
+	async_await(tbms_io_send_simple(&self->io, cmd2, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
 
-        payload[0] = 0x7F; //broadcast
-        payload[1] = TBMS_REG_FAULT_STATUS;
-        payload[2] = 0x00;//data to clear
-	async_await(tbms_io_send_simple(&self->io, payload, 3,
+	//Clear ALL TBMS_REG_FAULT_STATUS status bits
+ 	uint8_t cmd3[] = {TBMS_CMD_BROADCAST, TBMS_REG_FAULT_STATUS,
+			  TBMS_DATA_CLR_ZRO };
+	async_await(tbms_io_send_simple(&self->io, cmd3, 3,
 		    TBMS_REG_MODE_WRITE, 4) == 1, return 0);
 
 	self->clear_faults = false;
@@ -400,11 +404,7 @@ int tbms_setup_boards_task(struct tbms *self)
 {
 	async_dispatch(self->state);
 
-	uint8_t cmd[] = {
-		0,
-		0, //read registers starting at 0
-		1  //read one byte
-	};
+	uint8_t cmd[] = { TBMS_CMD_READ_REG, TBMS_REG_DEV_STATUS, 1 };
 
 	tbms_io_send(&self->io, cmd, 3, TBMS_REG_MODE_READ);
 
