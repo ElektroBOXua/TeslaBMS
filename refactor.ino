@@ -72,6 +72,23 @@ uint8_t esp_idf_uart_read()
 
 struct tbms tb;
 
+void print_stats(clock_t delta)
+{
+	static async state;
+	static clock_t timer = 0;
+	
+	async_dispatch(state);
+	
+	if (tb.tb.modules[0].exist)
+		printf("PACK VOLTAGE %f\n", tb.tb.modules[0].voltage);
+	
+	async_await((timer += delta) >= 1000, return);
+	
+	timer = 0;
+	
+	async_reset(return);
+}
+
 void setup()
 {
 	delay(5000);
@@ -103,6 +120,8 @@ void loop()
 
 	/*if (tb.tb.io.state == TBMS_IO_STATE_WAIT_FOR_REPLY)
 		printf("ready = %i\n", tb.tb.io.ready ? 1 : 0);*/
+
+	print_stats(delta);
 
 	tbms_update(&tb, delta);
 }

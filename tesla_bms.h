@@ -8,13 +8,13 @@
 //#define TBMS_DEBUG
 #define TBMS_MAX_MODULE_ADDR 0x3E
 #define TBMS_MAX_COMMANDS    20
-#define TBMS_MAX_IO_BUF      20
+#define TBMS_MAX_IO_BUF      40
 
 ///////////////////////////////////////////////////////////////////////////////
 #define TBMS_READ       0x00
 #define TBMS_WRITE      0x01
 #define TBMS_BROADCAST  0x7F
-#define TBMS_MODULE(n)  (n << 1)
+#define TBMS_MODULE(n)  ((n) << 1)
 
 #define TBMS_REG_DEV_STATUS      0
 #define TBMS_REG_GPAI            1
@@ -231,11 +231,13 @@ enum tbms_task {
 	TBMS_TASK_NONE,
 	TBMS_TASK_DISCOVER,
 	TBMS_TASK_SETUP_BOARDS,
-	TBMS_TASK_CLEAR_FAULTS
+	TBMS_TASK_CLEAR_FAULTS,
+	TBMS_TASK_READ_MODULE_VALUES
 };
 
 struct tbms_module {
-	int8_t address; //1 to 0x3E
+	float voltage;
+	
 	bool   exist;
 };
 
@@ -254,6 +256,8 @@ struct tbms
 	struct tbms_module modules[TBMS_MAX_MODULE_ADDR];
 	uint8_t modules_count;
 	uint8_t mod_sel;
+	
+	clock_t timer;
 };
 
 void tbms_init(struct tbms *self)
@@ -268,10 +272,14 @@ void tbms_init(struct tbms *self)
 	//self->discovery_done = false;
 	self->clear_faults = true;
 
-	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++)
-		self->modules[i].exist = false;
+	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
+		self->modules[i].exist   = false;
+		self->modules[i].voltage = 0.0;
+	}
 	self->modules_count = 0;
 	self->mod_sel = 0;
+	
+	self->timer = 0;
 }
 
 //////////////////// TASKS ////////////////////
@@ -299,6 +307,49 @@ bool tbms_validate_reply(struct tbms *self, uint8_t *reply, uint8_t len)
 		return true;
 	else
 		return false;
+}
+
+int tbms_read_module_values(struct tbms *self, uint8_t id)
+{
+	async_dispatch(self->state);
+
+	//ADC Auto mode, read every ADC input we can (Both Temps, Pack, 6 cells)
+	uint8_t cmd0[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+			  TBMS_REG_ADC_CTRL, 0b00111101 };
+	async_await(tbms_io_send(&self->io, cmd0, 3, 4), return 0);
+
+	//enable temperature measurement VSS pins
+  	uint8_t cmd1[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+			  TBMS_REG_IO_CTRL, 0b00000011 };
+	async_await(tbms_io_send(&self->io, cmd1, 3, 4), return 0);
+
+	//start all ADC conversions
+  	uint8_t cmd2[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+			  TBMS_REG_ADC_CONV, 1 };
+	async_await(tbms_io_send(&self->io, cmd2, 3, 4), return 0);
+
+	//start reading registers at the module voltage registers
+  	//read 18 bytes (Each value takes 2 - ModuleV, CellV1-6, Temp1, Temp2)
+  	uint8_t cmd3[] = {TBMS_READ | TBMS_MODULE(id + 1),
+			  TBMS_REG_GPAI, 0x12 };
+	async_await(tbms_io_send(&self->io, cmd3, 3, 22), return 0);
+
+	int crc = tbms_gen_crc(self->io.buf, self->io.len - 1);
+
+	uint8_t *buf = self->io.buf;
+
+	//18 data bytes, address, command, length, and CRC = 22 bytes returned
+	//Also validate CRC to ensure we didn't get garbage data.
+	//Also ensure this is actually the reply to our intended query
+	if (buf[21] == crc && buf[0] == TBMS_MODULE(id + 1) &&
+	    buf[1] == TBMS_REG_GPAI && buf[2] == 18) {
+		printf("CRC MATCH, EVERYTHING OK\n");
+		self->modules[id].voltage = 
+			(buf[3] * 256 + buf[4]) * 0.002034609f;
+	} else
+		printf("CRC MISMATCH, EVERYTHING IS BAD\n");
+
+	async_reset(return 1);
 }
 
 int tbms_clear_faults_task(struct tbms *self)
@@ -455,6 +506,7 @@ void tbms_tx_flush(struct tbms *self)
 void tbms_update_timers(struct tbms *self, clock_t delta)
 {
 	self->io.timer += delta;
+	self->timer    += delta;
 }
 
 void tbms_update(struct tbms *self, clock_t delta)
@@ -480,7 +532,11 @@ void tbms_update(struct tbms *self, clock_t delta)
 			tbms_push_task(self, TBMS_TASK_DISCOVER);
 		else if (self->clear_faults)
 			tbms_push_task(self, TBMS_TASK_CLEAR_FAULTS);
-			
+		else if (self->timer > 1000) {
+			tbms_push_task(self, TBMS_TASK_READ_MODULE_VALUES);
+			self->timer = 0;
+		}
+		
 		return;
 	}
 	
@@ -490,6 +546,10 @@ void tbms_update(struct tbms *self, clock_t delta)
 	case TBMS_TASK_DISCOVER:     ev = tbms_discover_task(self); break;
 	case TBMS_TASK_SETUP_BOARDS: ev = tbms_setup_boards_task(self); break;
 	case TBMS_TASK_CLEAR_FAULTS: ev = tbms_clear_faults_task(self); break;
+	
+	//YET READING MODULE 0 only (TODO MORE)
+	case TBMS_TASK_READ_MODULE_VALUES:
+		ev = tbms_read_module_values(self, 0); break;
 	}
 	
 	if (ev == 1) {

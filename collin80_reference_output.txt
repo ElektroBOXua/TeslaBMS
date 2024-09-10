@@ -1,0 +1,110 @@
+Starting up!
+Started serial interface to BMS.
+Resetting to factory defaults
+4025 - DEBUG: attempts: 0x1
+Sending: 7F 3C A5 57
+Reply: 7F 3C A5 57
+Sending: 0 0 1
+Reply: 80 0 1 61
+4127 - DEBUG: 00 found
+Sending: 1 3B 81 8B
+Reply: 81 3B 81 8B
+4130 - DEBUG: Address assigned
+Sending: 0 0 1
+Reply: 0 0 1
+Sending: 0 0 1
+Reply: 0 0 1
+Sending: 0 0 1
+Reply: 0 0 1
+Sending: 7F 20 FF 7D
+Reply: 7F 20 FF 7D
+Sending: 7F 20 0 8E
+Reply: 7F 20 0 8E
+Sending: 7F 21 FF 68
+Reply: 7F 21 FF 68
+Sending: 7F 21 0 9B
+Reply: 7F 21 0 9B
+Sending: 3 32 0 6E
+Reply: 3 32 0 6E
+4157 - DEBUG:
+4157 - DEBUG: Module 1 exists. Reading voltage and temperature values
+Sending: 2 20 4
+Reply: 2 20 4 0 0 0 0
+4170 - DEBUG: Module 1   alerts=0x0   faults=0x0   COV=0x0   CUV=0x0
+Sending: 3 30 3D F7
+Reply: 3 30 3D
+Sending: 3 31 3 58
+Reply: 3 31 3
+Sending: 3 34 1 17
+Reply: 3 34 1
+Sending: 2 1 12
+Reply: 2 1 12 20 67 23 76 22 A2 0 1 24 FD 25 E7 0 0 10 42 0 4 BD
+4194 - DEBUG: Sent CRC: BD     Calculated CRC: BD
+4195 - DEBUG: Got voltage and temperature readings
+4206 - DEBUG: Good RX: 1       Bad RX: 0
+4206 - DEBUG: Module voltage: 16.877
+4207 - DEBUG: Lowest Cell V: 0.000     Highest Cell V: 3.702
+4218 - DEBUG: Temp1: 23.568       Temp2: -84.848
+Sending: 3 32 0 6E
+Reply: 3 32 0 6E
+5157 - DEBUG:
+5157 - DEBUG: Module 1 exists. Reading voltage and temperature values
+Sending: 2 20 4
+Reply: 2 20 4 0 2 0 24
+5160 - DEBUG: Module 1   alerts=0x0   faults=0x2   COV=0x0   CUV=0x24
+Sending: 3 30 3D F7
+Reply: 3 30 3D
+Sending: 3 31 3 58
+Reply: 3 31 3
+Sending: 3 34 1 17
+Reply: 3 34 1
+Sending: 2 1 12
+Reply: 2 1 12 20 63 23 76 22 9E 0 1 24 FC 25 E7 0 0 10 3E 0 0 1E
+5184 - DEBUG: Sent CRC: 1E     Calculated CRC: 1E
+5195 - DEBUG: Got voltage and temperature readings
+5196 - DEBUG: Good RX: 2       Bad RX: 0
+5196 - DEBUG: Module voltage: 16.869
+5207 - DEBUG: Lowest Cell V: 0.000     Highest Cell V: 3.702
+5208 - DEBUG: Temp1: 23.534       Temp2: -89.265
+Sending: 3 32 0 6E
+Reply: 3 32 0 6E
+6158 - DEBUG:
+6158 - DEBUG: Module 1 exists. Reading voltage and temperature values
+Sending: 2 20 4
+Reply: 2 20 4 0 2 0 24
+6161 - DEBUG: Module 1   alerts=0x0   faults=0x2   COV=0x0   CUV=0x24
+Sending: 3 30 3D F7
+Reply: 3 30 3D
+Sending: 3 31 3 58
+Reply: 3 31 3
+Sending: 3 34 1 17
+Reply: 3 34 1
+Sending: 2 1 12
+Reply: 2 1 12 20 62 23 75 22 9C 0 1 24 FA 25 E9 0 0 10 3D 0 0 6D
+6185 - DEBUG: Sent CRC: 6D     Calculated CRC: 6D
+6196 - DEBUG: Got voltage and temperature readings
+6197 - DEBUG: Good RX: 3       Bad RX: 0
+6197 - DEBUG: Module voltage: 16.867
+6208 - DEBUG: Lowest Cell V: 0.000     Highest Cell V: 3.702
+6209 - DEBUG: Temp1: 23.526       Temp2: -89.265
+Sending: 3 32 0 6E
+Reply: 3 32 0 6E
+7159 - DEBUG:
+7159 - DEBUG: Module 1 exists. Reading voltage and temperature values
+Sending: 2 20 4
+Reply: 2 20 4 0 2 0 24
+7162 - DEBUG: Module 1   alerts=0x0   faults=0x2   COV=0x0   CUV=0x24
+Sending: 3 30 3D F7
+Reply: 3 30 3D
+Sending: 3 31 3 58
+Reply: 3 31 3
+Sending: 3 34 1 17
+Reply: 3 34 1
+Sending: 2 1 12
+Reply: 2 1 12 20 62 23 76 22 9A 0 1 24 F9 25 E9 0 0 10 3D 0 0 4F
+7186 - DEBUG: Sent CRC: 4F     Calculated CRC: 4F
+7197 - DEBUG: Got voltage and temperature readings
+7198 - DEBUG: Good RX: 4       Bad RX: 0
+7198 - DEBUG: Module voltage: 16.867
+7209 - DEBUG: Lowest Cell V: 0.000     Highest Cell V: 3.702
+7210 - DEBUG: Temp1: 23.526       Temp2: -89.265
