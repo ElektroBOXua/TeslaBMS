@@ -67,7 +67,7 @@ uint8_t esp_idf_uart_read()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-#define TBMS_DEBUG
+//#define TBMS_DEBUG
 #include "tesla_bms.h"
 
 struct tbms tb;
@@ -79,8 +79,8 @@ void print_stats(clock_t delta)
 	
 	async_dispatch(state);
 	
-	if (tb.tb.modules[0].exist)
-		printf("PACK VOLTAGE %f\n", tb.tb.modules[0].voltage);
+	printf("PACK VOLTAGE %f\n", tbms_get_module_voltage(&tb, 0));
+	printf("PACK TEMP    %f\n", tbms_get_module_temp1(&tb, 0));
 	
 	async_await((timer += delta) >= 1000, return);
 	

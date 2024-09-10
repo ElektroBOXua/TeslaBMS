@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+#include <math.h>
 
 //#define TBMS_DEBUG
 #define TBMS_MAX_MODULE_ADDR 0x3E
@@ -238,6 +239,9 @@ enum tbms_task {
 struct tbms_module {
 	float voltage;
 	
+	float  temp1;
+	float  temp2;
+	
 	bool   exist;
 };
 
@@ -311,8 +315,10 @@ bool tbms_validate_reply(struct tbms *self, uint8_t *reply, uint8_t len)
 
 int tbms_read_module_values(struct tbms *self, uint8_t id)
 {
-	async_dispatch(self->state);
+	struct tbms_module *mod = &self->modules[id];
 
+	async_dispatch(self->state);
+	
 	//ADC Auto mode, read every ADC input we can (Both Temps, Pack, 6 cells)
 	uint8_t cmd0[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
 			  TBMS_REG_ADC_CTRL, 0b00111101 };
@@ -343,12 +349,32 @@ int tbms_read_module_values(struct tbms *self, uint8_t id)
 	//Also ensure this is actually the reply to our intended query
 	if (buf[21] == crc && buf[0] == TBMS_MODULE(id + 1) &&
 	    buf[1] == TBMS_REG_GPAI && buf[2] == 18) {
-		printf("CRC MATCH, EVERYTHING OK\n");
-		self->modules[id].voltage = 
-			(buf[3] * 256 + buf[4]) * 0.002034609f;
-	} else
-		printf("CRC MISMATCH, EVERYTHING IS BAD\n");
+		//printf("CRC MATCH, EVERYTHING OK\n");
+		mod->voltage = (buf[3] * 256 + buf[4]) * 0.002034609f;
+		
+		float temp;
+		float temp_calc;
 
+		temp = (1.78f / ((buf[17] * 256 + buf[18] + 2) /
+			    33046.0f) - 3.57f) * 1000.0f;
+		temp_calc =  1.0f / (0.0007610373573f + 
+			    (0.0002728524832 * logf(temp)) +
+			    (powf(logf(temp), 3) * 0.0000001022822735f));            
+
+		mod->temp1 = temp_calc - 273.15f;     
+
+		temp = (1.78f / ((buf[19] * 256 + buf[20] + 2) /
+			    33046.0f) - 3.57f) * 1000.0f;
+		temp_calc =  1.0f / (0.0007610373573f + 
+			    (0.0002728524832 * logf(temp)) +
+			    (powf(logf(temp), 3) * 0.0000001022822735f));
+
+		mod->temp2 = temp_calc - 273.15f;
+
+	} else {
+		//printf("CRC MISMATCH, EVERYTHING IS BAD\n");
+	}
+	
 	async_reset(return 1);
 }
 
@@ -451,16 +477,6 @@ int tbms_discover_task(struct tbms *self)
 }
 
 //////////////////// API ////////////////////
-/*void tbms_clear_faults(struct tbms *self)
-{
-	
-}
-
-void tbms_discover(struct tbms *self)
-{
-	
-}*/
-
 bool tbms_tx_available(struct tbms *self)
 {
 	if (self->io.state == TBMS_IO_STATE_WAIT_FOR_SEND && self->io.ready)
@@ -500,6 +516,23 @@ void tbms_tx_flush(struct tbms *self)
 {
 	if (self->io.state == TBMS_IO_STATE_WAIT_FOR_SEND)
 		self->io.ready = false;
+}
+
+//////////////////// API (MODULE) ////////////////////
+float tbms_get_module_temp1(struct tbms *self, uint8_t id)
+{
+	if (!self->modules[id].exist)
+		return -273.15f;
+
+	return self->modules[id].temp1;
+}
+
+float tbms_get_module_voltage(struct tbms *self, uint8_t id)
+{
+	if (!self->modules[id].exist)
+		return NAN;
+	
+	return self->modules[id].voltage;
 }
 
 //////////////////// UPDATE ////////////////////
@@ -630,6 +663,8 @@ typedef struct tbms tbms_orig;
 #define tbms_tx_flush(s)     tbms_tx_flush((tbms_orig *)s)
 #define tbms_rx_available(s) tbms_rx_available((tbms_orig *)s)
 #define tbms_set_rx(s, a)    tbms_set_rx((tbms_orig *)s, a)
+#define tbms_get_module_temp1(s, a)   tbms_get_module_temp1((tbms_orig *)s, a)
+#define tbms_get_module_voltage(s, a) tbms_get_module_temp1((tbms_orig *)s, a)
 
 #define tbms        tbms_debug
 #define tbms_init   tbms_init_debug
