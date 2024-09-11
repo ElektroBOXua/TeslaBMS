@@ -359,7 +359,7 @@ int tbms_read_module_values(struct tbms *self, uint8_t id)
 			    33046.0f) - 3.57f) * 1000.0f;
 		temp_calc =  1.0f / (0.0007610373573f + 
 			    (0.0002728524832 * logf(temp)) +
-			    (powf(logf(temp), 3) * 0.0000001022822735f));            
+			    (powf(logf(temp), 3) * 0.0000001022822735f));
 
 		mod->temp1 = temp_calc - 273.15f;     
 
@@ -663,8 +663,10 @@ typedef struct tbms tbms_orig;
 #define tbms_tx_flush(s)     tbms_tx_flush((tbms_orig *)s)
 #define tbms_rx_available(s) tbms_rx_available((tbms_orig *)s)
 #define tbms_set_rx(s, a)    tbms_set_rx((tbms_orig *)s, a)
-#define tbms_get_module_temp1(s, a)   tbms_get_module_temp1((tbms_orig *)s, a)
-#define tbms_get_module_voltage(s, a) tbms_get_module_temp1((tbms_orig *)s, a)
+#define tbms_get_module_temp1(s, a) \
+	tbms_get_module_temp1((tbms_orig *)s, a)
+#define tbms_get_module_voltage(s, a) \
+	tbms_get_module_voltage((tbms_orig *)s, a)
 
 #define tbms        tbms_debug
 #define tbms_init   tbms_init_debug
