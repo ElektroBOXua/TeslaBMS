@@ -565,7 +565,7 @@ void tbms_update(struct tbms *self, clock_t delta)
 			tbms_push_task(self, TBMS_TASK_DISCOVER);
 		else if (self->clear_faults)
 			tbms_push_task(self, TBMS_TASK_CLEAR_FAULTS);
-		else if (self->timer > 1000) {
+		else if (self->timer >= 1000) {
 			tbms_push_task(self, TBMS_TASK_READ_MODULE_VALUES);
 			self->timer = 0;
 		}
