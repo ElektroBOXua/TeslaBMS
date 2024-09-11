@@ -1,3 +1,5 @@
+Module 0 voltage:  nan
+Module 0 temp1:    -273.149994
 [  0] tbms.io.state: IDLE -> WAIT_FOR_SEND
 [  0] tbms.io.txbuf: 0x7F 0x3C 0xA5 0x57 
 [  1] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
@@ -36,27 +38,50 @@
 [ 49] tbms.io.txbuf: 0x00 0x00 0x01 
 [ 50] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
 [ 53] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
-[ 53] tbms.io.rxbuf: 0x00 0x00 0x00 
+[ 53] tbms.io.rxbuf: 0x00 0x00 0x01 
 [ 54] tbms.io.state: RX_DONE -> IDLE
 [ 56] tbms.io.state: IDLE -> WAIT_FOR_SEND
 [ 56] tbms.io.txbuf: 0x7F 0x20 0xFF 0x7D 
 [ 57] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
 [ 61] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
-[ 61] tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+[ 61] tbms.io.rxbuf: 0x7F 0x20 0xFF 0x7D 
 [ 62] tbms.io.state: RX_DONE -> WAIT_FOR_SEND
 [ 62] tbms.io.txbuf: 0x7F 0x20 0x00 0x8E 
 [ 63] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
 [ 67] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
-[ 67] tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+[ 67] tbms.io.rxbuf: 0x7F 0x20 0x00 0x8E 
 [ 68] tbms.io.state: RX_DONE -> WAIT_FOR_SEND
 [ 68] tbms.io.txbuf: 0x7F 0x21 0xFF 0x68 
 [ 69] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
 [ 73] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
-[ 73] tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+[ 73] tbms.io.rxbuf: 0x7F 0x21 0xFF 0x68 
 [ 74] tbms.io.state: RX_DONE -> WAIT_FOR_SEND
 [ 74] tbms.io.txbuf: 0x7F 0x21 0x00 0x9B 
 [ 75] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
 [ 79] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
-[ 79] tbms.io.rxbuf: 0x00 0x00 0x00 0x00 
+[ 79] tbms.io.rxbuf: 0x7F 0x21 0x00 0x9B 
 [ 80] tbms.io.state: RX_DONE -> IDLE
+[ 1000] tbms.io.state: IDLE -> WAIT_FOR_SEND
+[ 1000] tbms.io.txbuf: 0x03 0x30 0x3D 0xF7 
+[ 1001] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+[ 1005] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+[ 1005] tbms.io.rxbuf: 0x03 0x30 0x3D 0xF7 
+[ 1006] tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+[ 1006] tbms.io.txbuf: 0x03 0x31 0x03 0x58 
+[ 1007] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+[ 1011] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+[ 1011] tbms.io.rxbuf: 0x03 0x31 0x03 0x58 
+[ 1012] tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+[ 1012] tbms.io.txbuf: 0x03 0x34 0x01 0x17 
+[ 1013] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+[ 1017] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+[ 1017] tbms.io.rxbuf: 0x03 0x34 0x01 0x17 
+[ 1018] tbms.io.state: RX_DONE -> WAIT_FOR_SEND
+[ 1018] tbms.io.txbuf: 0x02 0x01 0x12 
+[ 1019] tbms.io.state: WAIT_FOR_SEND -> WAIT_FOR_REPLY
+[ 1041] tbms.io.state: WAIT_FOR_REPLY -> RX_DONE
+[ 1041] tbms.io.rxbuf: 0x02 0x01 0x12 0x20 0x67 0x23 0x76 0x22 0xA2 0x00 0x01 0x24 0xFD 0x25 0xE7 0x00 0x00 0x10 0x42 0x00 0x04 0xBD 
+[ 1042] tbms.io.state: RX_DONE -> IDLE
+Module 0 voltage:  16.877081
+Module 0 temp1:    23.567810
 2 modules detected!

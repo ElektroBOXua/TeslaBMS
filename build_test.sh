@@ -1,4 +1,4 @@
-gcc tesla_bms.test.c -std=c99 -Wall -Wextra
+gcc tesla_bms.test.c -std=c99 -Wall -Wextra -g
 
 ./a > output.txt
 
