@@ -44,8 +44,13 @@ void print_stats(clock_t delta)
 	
 	async_dispatch(state);
 	
-	printf("Module 0 voltage:  %f\n", tbms_get_module_voltage(&tb, 0));
-	printf("Module 0 temp1:    %f\n", tbms_get_module_temp1(&tb, 0));
+	printf("Module 0 voltage:         %f\n",
+		tbms_get_module_voltage(&tb, 0));
+	printf("Module 0 temp1:           %f\n",
+		tbms_get_module_temp1(&tb, 0));
+	for (int i = 0; i < 6; i++)
+		printf("Module 0 cell %i voltage: %f\n", i,
+			tbms_get_module_cell_voltage(&tb, 0, i));
 	//printf("Module 0 temp2:    %f\n", tbms_get_module_temp2(&tb, 0));
 	
 	async_await((timer += delta) >= 1500, return);

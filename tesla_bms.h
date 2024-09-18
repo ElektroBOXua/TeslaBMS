@@ -248,12 +248,18 @@ enum tbms_state {
 	TBMS_STATE_CONNECTION_ESTABLISHED
 };
 
+struct tbms_module_cell {
+	float voltage;
+};
+
 struct tbms_module {
 	float voltage;
 	
 	float  temp1;
 	float  temp2;
-	
+
+	struct tbms_module_cell cell[6];
+
 	bool   exist;
 };
 
@@ -289,6 +295,8 @@ void tbms_init(struct tbms *self)
 	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
 		self->modules[i].exist   = false;
 		self->modules[i].voltage = 0.0;
+		for (int j = 0; j < 6; j++)
+			self->modules[i].cell[j].voltage = NAN;
 	}
 	self->modules_count = 0;
 	self->mod_sel = 0;
@@ -340,7 +348,7 @@ enum tbms_task_event tbms_read_module_values(struct tbms *self, uint8_t id)
 
 
 	int crc = tbms_gen_crc(self->io.buf, self->io.len - 1);
-
+        
 	uint8_t *buf = self->io.buf;
 
 	//18 data bytes, address, command, length, and CRC = 22 bytes returned
@@ -351,6 +359,11 @@ enum tbms_task_event tbms_read_module_values(struct tbms *self, uint8_t id)
 		//printf("CRC MATCH, EVERYTHING OK\n");
 		mod->voltage = (buf[3] * 256 + buf[4]) * 0.002034609f;
 		
+		for (int i = 0; i < 6; i++)
+			mod->cell[i].voltage = 
+				(buf[5 + (i * 2)] * 256 + buf[6 + (i * 2)]) *
+				 0.000381493f;
+
 		float temp;
 		float temp_calc;
 
@@ -527,20 +540,37 @@ void tbms_tx_flush(struct tbms *self)
 }
 
 //////////////////// API (MODULE) ////////////////////
+#define TBMS_MODULE_METHOD_CHECKS(ret) \
+	if (id >= TBMS_MAX_MODULE_ADDR) id = TBMS_MAX_MODULE_ADDR - 1; \
+	if (!self->modules[id].exist) \
+		return ret//-273.15f;
+
 float tbms_get_module_temp1(struct tbms *self, uint8_t id)
 {
-	if (!self->modules[id].exist)
-		return -273.15f;
+	TBMS_MODULE_METHOD_CHECKS(NAN);//-273.15f;
 
 	return self->modules[id].temp1;
 }
 
+float tbms_get_module_temp2(struct tbms *self, uint8_t id)
+{
+	TBMS_MODULE_METHOD_CHECKS(NAN);//-273.15f;
+
+	return self->modules[id].temp2;
+}
+
 float tbms_get_module_voltage(struct tbms *self, uint8_t id)
 {
-	if (!self->modules[id].exist)
-		return NAN;
+	TBMS_MODULE_METHOD_CHECKS(NAN);
 	
 	return self->modules[id].voltage;
+}
+
+float tbms_get_module_cell_voltage(struct tbms* self, uint8_t id, uint8_t cn)
+{
+	TBMS_MODULE_METHOD_CHECKS(NAN);
+	
+	return self->modules[id].cell[cn].voltage;
 }
 
 //////////////////// UPDATE ////////////////////
@@ -699,7 +729,9 @@ typedef struct tbms tbms_orig;
 	tbms_get_module_temp1((tbms_orig *)s, a)
 #define tbms_get_module_voltage(s, a) \
 	tbms_get_module_voltage((tbms_orig *)s, a)
-
+#define tbms_get_module_cell_voltage(s, a, b) \
+	tbms_get_module_cell_voltage((tbms_orig *)s, a, b)
+	
 #define tbms        tbms_debug
 #define tbms_init   tbms_init_debug
 #define tbms_update tbms_update_debug
