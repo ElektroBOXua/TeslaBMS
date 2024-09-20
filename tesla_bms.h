@@ -6,6 +6,28 @@
 #include <time.h>
 #include <math.h>
 
+///////////////////////// ASYNC COROUTINES DEFINITIONS ////////////////////////
+#include <stddef.h>
+
+typedef void * async;
+
+#define ASYNC_CAT1(a, b) a##b
+#define ASYNC_CAT(a, b) ASYNC_CAT1(a, b)
+
+#define async_dispatch(state) void **_state = &state; \
+			 if (*_state) { goto **_state; }
+
+/* DANGLING POINTER WARNING!
+ * If there is a return statement between assignment and label,
+ * compiler might think that anything after a return statement is unreachable
+ * and may throw this warning. It's actually a false positive, so ignore it. */
+#define async_yield(act) do { *_state = &&ASYNC_CAT(_l, __LINE__); \
+			      act; ASYNC_CAT(_l, __LINE__) :; } while (0)
+#define async_await(cond, act) \
+			 do { async_yield(); if (!(cond)) { act; } } while (0)
+#define async_reset(act) do { *_state = NULL; act; } while (0)
+
+////////////////////////////// GENERAL DEFINITIONS ////////////////////////////
 //#define TBMS_DEBUG
 #define TBMS_MAX_MODULE_ADDR 0x3E
 #define TBMS_MAX_COMMANDS    20
@@ -15,7 +37,7 @@
 #define TBMS_BALANCE_VOLTAGE 3.9
 #define TBMS_BALANCE_HYST    0.04
 
-///////////////////////////////////////////////////////////////////////////////
+//////////////////////////// REGISTER RELATED STUFF ///////////////////////////
 #define TBMS_READ       0x00
 #define TBMS_WRITE      0x01
 #define TBMS_BROADCAST  0x7F
@@ -46,28 +68,7 @@
 #define TBMS_DATA_SEL_ALL  0xFF
 #define TBMS_DATA_CLR_ZRO  0x00
 
-///////////////////////////////////////////////////////////////////////////////
-#include <stddef.h>
-
-typedef void * async;
-
-#define ASYNC_CAT1(a, b) a##b
-#define ASYNC_CAT(a, b) ASYNC_CAT1(a, b)
-
-#define async_dispatch(state) void **_state = &state; \
-			 if (*_state) { goto **_state; }
-
-/* DANGLING POINTER WARNING!
- * If there is a return statement between assignment and label,
- * compiler might think that anything after a return statement is unreachable
- * and may throw this warning. It's actually a false positive, so ignore it. */
-#define async_yield(act) do { *_state = &&ASYNC_CAT(_l, __LINE__); \
-			      act; ASYNC_CAT(_l, __LINE__) :; } while (0)
-#define async_await(cond, act) \
-			 do { async_yield(); if (!(cond)) { act; } } while (0)
-#define async_reset(act) do { *_state = NULL; act; } while (0)
-
-///////////////////////////////////////////////////////////////////////////////
+/////////////////////////// GLOBAL & GENERIC FUNCTIONS ////////////////////////
 uint8_t tbms_gen_crc(uint8_t *data, int len)
 {
 	uint8_t generator = 0x07;
@@ -87,7 +88,7 @@ uint8_t tbms_gen_crc(uint8_t *data, int len)
 	return crc;
 }
 
-///////////////////////////////////////////////////////////////////////////////
+////////////////////// EVERYTHING RELATED TO INPUT/OUTPUT /////////////////////
 enum tbms_io_state {
 	TBMS_IO_STATE_IDLE,
 	TBMS_IO_STATE_WAIT_FOR_SEND,
@@ -203,6 +204,14 @@ bool tbms_io_rx_done(struct tbms_io *self)
 	return false;
 }
 
+bool tbms_io_validate_reply(struct tbms_io *self, uint8_t *reply, uint8_t len)
+{
+	if (!memcmp(self->buf, reply, len))
+		return true;
+	else
+		return false;
+}
+
 void tbms_io_update(struct tbms_io *self)
 {
 	if (self->state == TBMS_IO_STATE_TIMEOUT)
@@ -231,98 +240,101 @@ const char *tbms_io_get_state_name(uint8_t state)
 }
 #endif
 
-///////////////////////////////////////////////////////////////////////////////
+/////////////////////////////// TASK DEFINITIONS //////////////////////////////
+//Events returned by tasks
 enum tbms_task_event {
-	TBMS_TASK_EVENT_NONE,
+	TBMS_TASK_EVENT_NONE, //No event, keep running
 	TBMS_TASK_EVENT_EXIT_OK,
 	TBMS_TASK_EVENT_EXIT_FAULT
 };
 
-enum tbms_task {
-	TBMS_TASK_NONE,
-	TBMS_TASK_DISCOVER,
-	TBMS_TASK_SETUP_BOARDS,
-	TBMS_TASK_CLEAR_FAULTS,
-	TBMS_TASK_READ_MODULE_VALUES
-};
-
-enum tbms_state {
-	TBMS_STATE_INIT,
-	TBMS_STATE_ESTABLISH_CONNECTION,
-	TBMS_STATE_CONNECTION_ESTABLISHED
-};
-
-struct tbms_module_cell {
-	float voltage;
-	bool  balance; /* If cell needs to be balanced or not. */
-};
-
-struct tbms_module {
-	float voltage;
+//Common structure used by various tasks
+struct tbms_task {
+	async state;        //Asynchronous state of task
 	
-	float  temp1;
-	float  temp2;
+	struct tbms_io io; //Task input/output
+	uint8_t module_id; //TBMS module ID used by task
 
-	struct tbms_module_cell cell[6];
-	uint8_t balance_bits;
-	
-	bool   exist;
+	int i; //Common iterator used by task
+
+	void *data; //Data stored/accessed by task
 };
 
-struct tbms
+//Discover all available TBMS modules
+enum tbms_task_event tbms_task_discover(struct tbms_task *self)
 {
-	enum tbms_state state;
+	async_dispatch(self->state);
 
-	async async_state;
-	async async_task_state;
+	uint8_t cmd[] = { TBMS_BROADCAST, TBMS_REG_RESET, 0xA5 };
+			
+	async_await(tbms_io_send(&self->io, cmd, 3, 4),
+		    return TBMS_TASK_EVENT_NONE);
 
-	enum tbms_task_event (**current_task)(struct tbms *self);
+	uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
+
+	if (tbms_io_validate_reply(&self->io, expected_reply, 4))
+		async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 	
-	struct tbms_io io;
+	async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
+}
 
-	struct tbms_module modules[TBMS_MAX_MODULE_ADDR];
-	uint8_t modules_count;
-	uint8_t mod_sel;
-	
-	clock_t timer;
-};
-
-void tbms_init(struct tbms *self)
+enum tbms_task_event tbms_task_setup_modules(struct tbms_task *self)
 {
-	self->state = TBMS_STATE_INIT;
+	async_dispatch(self->state);
 
-	self->async_state      = 0;
-	self->async_task_state = 0;
+	uint8_t cmd[] = { TBMS_READ, TBMS_REG_DEV_STATUS, 1 };
 
-	self->current_task = NULL;
+	async_await(tbms_io_send(&self->io, cmd, 3, 3), return
+		    TBMS_TASK_EVENT_NONE);
 
-	tbms_io_init(&self->io);
-
-	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
-		self->modules[i].exist   = false;
-		self->modules[i].voltage = 0.0;
-		self->modules[i].balance_bits = 0;
-		for (int j = 0; j < 6; j++)
-			self->modules[i].cell[j].voltage = NAN;
+	uint8_t expected_reply[]  = { 0x80, 0x00, 0x01}; //more modules ahead
+	uint8_t expected_reply2[] = { 0x00, 0x00, 0x01}; //last module
+	if (!tbms_io_validate_reply(&self->io, expected_reply, 3)) {
+		if (!tbms_io_validate_reply(&self->io, expected_reply2, 3))
+			async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
+		else
+			async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 	}
-	self->modules_count = 0;
-	self->mod_sel = 0;
 	
-	self->timer = 0;
+	//Skip bytes 0x61, 0x35 that appear after around 45us.
+	async_await(tbms_io_recv(&self->io, 2), return TBMS_TASK_EVENT_NONE);
+	
+	for (self->i = 0; self->i < TBMS_MAX_MODULE_ADDR; self->i++)
+		if (!self->modules[self->i].exist)
+			break;
+
+	if (self->i >= TBMS_MAX_MODULE_ADDR)
+		async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
+
+	uint8_t cmd2[] = { TBMS_WRITE, TBMS_REG_ADDR_CTRL,
+		(uint8_t)((self->mod_sel + 1) | 0x80)
+	};
+
+	async_await(tbms_io_send(&self->io, cmd2, 3, 10) ||
+		    self->io.timer >= 50, return TBMS_TASK_EVENT_NONE);
+
+	if (self->io.len < 3)
+		async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
+
+	uint8_t expected_reply3[] = { 
+		0x81, TBMS_REG_ADDR_CTRL,
+		(uint8_t)((self->mod_sel + 1) + 0x80)/*, 0x??*/};
+
+	if (!tbms_io_validate_reply(&self->io, expected_reply3, 3))
+		async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
+
+	tbms_io_rx_done(&self->io);
+
+	data.modules[self->i].exist = true;
+	data.modules_count++;
+
+	//Repeat if task not yet destroyed
+	async_reset(return TBMS_TASK_EVENT_NONE);
 }
 
-bool tbms_validate_reply(struct tbms *self, uint8_t *reply, uint8_t len)
+enum tbms_task_event tbms_task_read_module_values(struct tbms_task *self)
 {
-	if (!memcmp(self->io.buf, reply, len))
-		return true;
-	else
-		return false;
-}
-
-//////////////////// TASKS ////////////////////
-enum tbms_task_event tbms_task_read_module_values(struct tbms *self, uint8_t id)
-{
-	struct tbms_module *mod = &self->modules[id];
+	struct tbms_module *mod = &self->module_id;
 
 	async_dispatch(self->async_task_state);
 	
@@ -481,88 +493,6 @@ enum tbms_task_event tbms_task_clear_faults(struct tbms *self)
 	async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 }
 
-enum tbms_task_event tbms_task_setup_boards(struct tbms *self)
-{
-	async_dispatch(self->async_task_state);
-
-	uint8_t cmd[] = { TBMS_READ, TBMS_REG_DEV_STATUS, 1 };
-
-	async_await(tbms_io_send(&self->io, cmd, 3, 3), return
-		    TBMS_TASK_EVENT_NONE);
-
-	uint8_t expected_reply[]  = { 0x80, 0x00, 0x01}; //more modules ahead
-	uint8_t expected_reply2[] = { 0x00, 0x00, 0x01}; //last module
-	if (!tbms_validate_reply(self, expected_reply, 3)) {
-		if (!tbms_validate_reply(self, expected_reply2, 3))
-			async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
-		else
-			async_reset(return TBMS_TASK_EVENT_EXIT_OK);
-	}
-	
-	//Skip bytes 0x61, 0x35 that appear after around 45us.
-	async_await(tbms_io_recv(&self->io, 2), return TBMS_TASK_EVENT_NONE);
-
-	int i;
-	
-	for (i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
-		if (!self->modules[i].exist) {
-			self->mod_sel = i;
-			break;
-		}
-	}
-
-	if (i >= TBMS_MAX_MODULE_ADDR)
-		async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
-
-	uint8_t cmd2[] = { TBMS_WRITE, TBMS_REG_ADDR_CTRL,
-		(uint8_t)((self->mod_sel + 1) | 0x80)
-	};
-
-	async_await(tbms_io_send(&self->io, cmd2, 3, 10) ||
-		    self->io.timer >= 50, return TBMS_TASK_EVENT_NONE);
-
-	if (self->io.len < 3)
-		async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
-
-	uint8_t expected_reply3[] = { 
-		0x81, TBMS_REG_ADDR_CTRL,
-		(uint8_t)((self->mod_sel + 1) + 0x80)/*, 0x??*/};
-
-	if (!tbms_validate_reply(self, expected_reply3, 3))
-		async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
-
-	tbms_io_rx_done(&self->io);
-
-	self->modules[self->mod_sel].exist = true;
-	self->modules_count++;
-
-	//Repeat if task not yet destroyed
-	async_reset(return TBMS_TASK_EVENT_NONE);
-}
-
-enum tbms_task_event tbms_task_discover(struct tbms *self)
-{
-	async_dispatch(self->async_task_state);
-
-	uint8_t cmd[] = { TBMS_BROADCAST, TBMS_REG_RESET, 0xA5 };
-			
-	async_await(tbms_io_send(&self->io, cmd, 3, 4),
-		    return TBMS_TASK_EVENT_NONE);
-
-	uint8_t expected_reply[] = { 0x7F, 0x3C, 0xA5, 0x57 };
-
-	if (tbms_validate_reply(self, expected_reply, 4))
-		async_reset(return TBMS_TASK_EVENT_EXIT_OK);
-	
-	async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
-}
-
-//////////////////// TASK API ////////////////////
-void tbms_task_supervisor()
-{
-	
-}
-
 //////////////////// API ////////////////////
 bool tbms_tx_available(struct tbms *self)
 {
@@ -639,6 +569,72 @@ float tbms_get_module_cell_voltage(struct tbms* self, uint8_t id, uint8_t cn)
 	return self->modules[id].cell[cn].voltage;
 }
 
+//////////////////////////// TESLA BMS MAIN INSTANCE //////////////////////////
+enum tbms_state {
+	TBMS_STATE_INIT,
+	TBMS_STATE_ESTABLISH_CONNECTION,
+	TBMS_STATE_CONNECTION_ESTABLISHED
+};
+
+struct tbms_module_cell {
+	float voltage;
+	bool  balance; /* If cell needs to be balanced or not. */
+};
+
+struct tbms_module {
+	float voltage;
+	
+	float  temp1;
+	float  temp2;
+
+	struct tbms_module_cell cell[6];
+	uint8_t balance_bits;
+	
+	bool   exist;
+};
+
+struct tbms
+{
+	enum tbms_state state;
+
+	async async_state;
+	async async_task_state;
+
+	enum tbms_task_event (**current_task)(struct tbms *self);
+	
+	struct tbms_io io;
+
+	struct tbms_module modules[TBMS_MAX_MODULE_ADDR];
+	uint8_t modules_count;
+	uint8_t mod_sel;
+	
+	clock_t timer;
+};
+
+void tbms_init(struct tbms *self)
+{
+	self->state = TBMS_STATE_INIT;
+
+	self->async_state      = 0;
+	self->async_task_state = 0;
+
+	self->current_task = NULL;
+
+	tbms_io_init(&self->io);
+
+	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
+		self->modules[i].exist   = false;
+		self->modules[i].voltage = 0.0;
+		self->modules[i].balance_bits = 0;
+		for (int j = 0; j < 6; j++)
+			self->modules[i].cell[j].voltage = NAN;
+	}
+	self->modules_count = 0;
+	self->mod_sel = 0;
+	
+	self->timer = 0;
+}
+
 //////////////////// UPDATE ////////////////////
 void tbms_update(struct tbms *self, clock_t delta)
 {
@@ -706,7 +702,8 @@ void tbms_update(struct tbms *self, clock_t delta)
 				continue;
 			
 			async_await(
-				tbms_task_read_module_values(self, self->mod_sel) !=
+				tbms_task_read_module_values(self,
+							     self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
 
 			async_await(
