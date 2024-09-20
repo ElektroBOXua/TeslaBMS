@@ -11,6 +11,10 @@
 #define TBMS_MAX_COMMANDS    20
 #define TBMS_MAX_IO_BUF      40
 
+//TODO make these configurable
+#define TBMS_BALANCE_VOLTAGE 3.9
+#define TBMS_BALANCE_HYST    0.04
+
 ///////////////////////////////////////////////////////////////////////////////
 #define TBMS_READ       0x00
 #define TBMS_WRITE      0x01
@@ -250,6 +254,7 @@ enum tbms_state {
 
 struct tbms_module_cell {
 	float voltage;
+	bool  balance; /* If cell needs to be balanced or not. */
 };
 
 struct tbms_module {
@@ -259,7 +264,8 @@ struct tbms_module {
 	float  temp2;
 
 	struct tbms_module_cell cell[6];
-
+	uint8_t balance_bits;
+	
 	bool   exist;
 };
 
@@ -385,6 +391,59 @@ enum tbms_task_event tbms_read_module_values(struct tbms *self, uint8_t id)
 
 	} else {
 		//printf("CRC MISMATCH, EVERYTHING IS BAD\n");
+	}
+	
+	async_reset(return TBMS_TASK_EVENT_EXIT_OK);
+}
+
+enum tbms_task_event tbms_balance_cells_task(struct tbms *self, uint8_t id)
+{
+	struct tbms_module *mod = &self->modules[id];
+
+	async_dispatch(self->async_task_state);
+
+	mod->balance_bits = 0; //bit 0-5 are to activate cell balancing 1-6
+
+	for (int i = 0; i < 6; i++) {
+		//If voltage greater than activation threshold - set balance on
+		if (mod->cell[id].voltage > TBMS_BALANCE_VOLTAGE)
+			mod->cell[id].balance = true;
+
+		//If voltage is lower than release threshold - set balance off
+		if (mod->cell[id].voltage <
+		   (TBMS_BALANCE_VOLTAGE - TBMS_BALANCE_HYST))
+			mod->cell[id].balance = false;
+
+		mod->balance_bits |= ((mod->cell[id].balance ? 1 : 0) << i);
+	}
+	
+	if (!mod->balance_bits)
+		async_reset(return TBMS_TASK_EVENT_EXIT_OK);
+
+	uint8_t cmd0[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+			  TBMS_REG_BAL_CTRL, 0 };
+	/* last byte resets balance time and must be done
+	   before setting balance resistors again. */
+
+	async_await(tbms_io_send(&self->io, cmd0, 3, 30),
+		    return TBMS_TASK_EVENT_NONE);
+
+	if (mod->balance_bits) //only send balance command when needed
+	{
+		uint8_t cmd0[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+				  TBMS_REG_BAL_TIME, 130 };
+		//last byte sets balance for 130 seconds
+
+		async_await(tbms_io_send(&self->io, cmd0, 3, 30),
+			    return TBMS_TASK_EVENT_NONE);
+
+
+		uint8_t cmd1[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+				  TBMS_REG_BAL_CTRL, mod->balance_bits };
+		//write balance state to register
+
+		async_await(tbms_io_send(&self->io, cmd1, 3, 30),
+			    return TBMS_TASK_EVENT_NONE);
 	}
 	
 	async_reset(return TBMS_TASK_EVENT_EXIT_OK);
@@ -647,6 +706,10 @@ void tbms_update(struct tbms *self, clock_t delta)
 			
 			async_await(
 				tbms_read_module_values(self, self->mod_sel) !=
+				TBMS_TASK_EVENT_NONE, return);
+
+			async_await(
+				tbms_balance_cells_task(self, self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
 		}
 		

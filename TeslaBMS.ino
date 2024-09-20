@@ -67,7 +67,7 @@ uint8_t esp_idf_uart_read()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//#define TBMS_DEBUG
+#define TBMS_DEBUG
 #include "tesla_bms.h"
 
 struct tbms tb;
