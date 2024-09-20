@@ -12,7 +12,7 @@
 #define TBMS_MAX_IO_BUF      40
 
 //TODO make these configurable
-#define TBMS_BALANCE_VOLTAGE 3.9
+#define TBMS_BALANCE_VOLTAGE 3.5
 #define TBMS_BALANCE_HYST    0.04
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -426,7 +426,7 @@ enum tbms_task_event tbms_balance_cells_task(struct tbms *self, uint8_t id)
 	/* last byte resets balance time and must be done
 	   before setting balance resistors again. */
 
-	async_await(tbms_io_send(&self->io, cmd0, 3, 30),
+	async_await(tbms_io_send(&self->io, cmd0, 3, 4),
 		    return TBMS_TASK_EVENT_NONE);
 
 	if (mod->balance_bits) //only send balance command when needed
@@ -435,7 +435,7 @@ enum tbms_task_event tbms_balance_cells_task(struct tbms *self, uint8_t id)
 				  TBMS_REG_BAL_TIME, 130 };
 		//last byte sets balance for 130 seconds
 
-		async_await(tbms_io_send(&self->io, cmd0, 3, 30),
+		async_await(tbms_io_send(&self->io, cmd0, 3, 4),
 			    return TBMS_TASK_EVENT_NONE);
 
 
@@ -443,7 +443,7 @@ enum tbms_task_event tbms_balance_cells_task(struct tbms *self, uint8_t id)
 				  TBMS_REG_BAL_CTRL, mod->balance_bits };
 		//write balance state to register
 
-		async_await(tbms_io_send(&self->io, cmd1, 3, 30),
+		async_await(tbms_io_send(&self->io, cmd1, 3, 4),
 			    return TBMS_TASK_EVENT_NONE);
 	}
 	
@@ -715,7 +715,7 @@ void tbms_update(struct tbms *self, clock_t delta)
 		}
 		
 		self->timer = 0;
-		async_await(self->timer >= 1000, return);
+		async_await(self->timer >= 5000, return);
 		
 		break;
 	}
