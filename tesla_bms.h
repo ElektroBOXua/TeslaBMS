@@ -12,7 +12,7 @@
 #define TBMS_MAX_IO_BUF      40
 
 //TODO make these configurable
-#define TBMS_BALANCE_VOLTAGE 3.5
+#define TBMS_BALANCE_VOLTAGE 3.9
 #define TBMS_BALANCE_HYST    0.04
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -311,7 +311,6 @@ void tbms_init(struct tbms *self)
 	self->timer = 0;
 }
 
-//////////////////// TASKS ////////////////////
 bool tbms_validate_reply(struct tbms *self, uint8_t *reply, uint8_t len)
 {
 	if (!memcmp(self->io.buf, reply, len))
@@ -320,7 +319,8 @@ bool tbms_validate_reply(struct tbms *self, uint8_t *reply, uint8_t len)
 		return false;
 }
 
-enum tbms_task_event tbms_read_module_values(struct tbms *self, uint8_t id)
+//////////////////// TASKS ////////////////////
+enum tbms_task_event tbms_task_read_module_values(struct tbms *self, uint8_t id)
 {
 	struct tbms_module *mod = &self->modules[id];
 
@@ -397,7 +397,7 @@ enum tbms_task_event tbms_read_module_values(struct tbms *self, uint8_t id)
 	async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 }
 
-enum tbms_task_event tbms_balance_cells_task(struct tbms *self, uint8_t id)
+enum tbms_task_event tbms_task_balance_cells(struct tbms *self, uint8_t id)
 {
 	struct tbms_module *mod = &self->modules[id];
 
@@ -450,7 +450,7 @@ enum tbms_task_event tbms_balance_cells_task(struct tbms *self, uint8_t id)
 	async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 }
 
-enum tbms_task_event tbms_clear_faults_task(struct tbms *self)
+enum tbms_task_event tbms_task_clear_faults(struct tbms *self)
 {
 	async_dispatch(self->async_task_state);
 	
@@ -481,7 +481,7 @@ enum tbms_task_event tbms_clear_faults_task(struct tbms *self)
 	async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 }
 
-enum tbms_task_event tbms_setup_boards_task(struct tbms *self)
+enum tbms_task_event tbms_task_setup_boards(struct tbms *self)
 {
 	async_dispatch(self->async_task_state);
 
@@ -540,7 +540,7 @@ enum tbms_task_event tbms_setup_boards_task(struct tbms *self)
 	async_reset(return TBMS_TASK_EVENT_NONE);
 }
 
-enum tbms_task_event tbms_discover_task(struct tbms *self)
+enum tbms_task_event tbms_task_discover(struct tbms *self)
 {
 	async_dispatch(self->async_task_state);
 
@@ -555,6 +555,12 @@ enum tbms_task_event tbms_discover_task(struct tbms *self)
 		async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 	
 	async_reset(return TBMS_TASK_EVENT_EXIT_FAULT);
+}
+
+//////////////////// TASK API ////////////////////
+void tbms_task_supervisor()
+{
+	
 }
 
 //////////////////// API ////////////////////
@@ -634,19 +640,13 @@ float tbms_get_module_cell_voltage(struct tbms* self, uint8_t id, uint8_t cn)
 }
 
 //////////////////// UPDATE ////////////////////
-void tbms_update_timers(struct tbms *self, clock_t delta)
-{
-	self->io.timer += delta;
-	self->timer    += delta;
-}
-
 void tbms_update(struct tbms *self, clock_t delta)
 {
 	enum tbms_task_event event;
 
 	//Update theese in any case
-	tbms_update_timers(self, delta);
-	tbms_io_update(&self->io);
+	self->io.timer += delta;
+	self->timer    += delta;
 
 	//If there is any INPUT/OUTPUT timeout
 	if (self->io.state == TBMS_IO_STATE_TIMEOUT) {
@@ -664,8 +664,8 @@ void tbms_update(struct tbms *self, clock_t delta)
 
 	//Tasks to perform to establish connection
 	static enum tbms_task_event (*task_list[])(struct tbms *self) = {
-		tbms_discover_task, tbms_setup_boards_task,
-		tbms_clear_faults_task, NULL //terminator
+		tbms_task_discover, tbms_task_setup_boards,
+		tbms_task_clear_faults, NULL //terminator
 	};
 
 	switch (self->state) {
@@ -706,16 +706,16 @@ void tbms_update(struct tbms *self, clock_t delta)
 				continue;
 			
 			async_await(
-				tbms_read_module_values(self, self->mod_sel) !=
+				tbms_task_read_module_values(self, self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
 
 			async_await(
-				tbms_balance_cells_task(self, self->mod_sel) !=
+				tbms_task_balance_cells(self, self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
 		}
 		
 		self->timer = 0;
-		async_await(self->timer >= 5000, return);
+		async_await(self->timer >= 1000, return);
 		
 		break;
 	}
