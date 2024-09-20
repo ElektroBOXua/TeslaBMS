@@ -301,6 +301,7 @@ void tbms_init(struct tbms *self)
 	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
 		self->modules[i].exist   = false;
 		self->modules[i].voltage = 0.0;
+		self->modules[i].balance_bits = 0;
 		for (int j = 0; j < 6; j++)
 			self->modules[i].cell[j].voltage = NAN;
 	}
@@ -406,15 +407,15 @@ enum tbms_task_event tbms_balance_cells_task(struct tbms *self, uint8_t id)
 
 	for (int i = 0; i < 6; i++) {
 		//If voltage greater than activation threshold - set balance on
-		if (mod->cell[id].voltage > TBMS_BALANCE_VOLTAGE)
-			mod->cell[id].balance = true;
+		if (mod->cell[i].voltage > TBMS_BALANCE_VOLTAGE)
+			mod->cell[i].balance = true;
 
 		//If voltage is lower than release threshold - set balance off
-		if (mod->cell[id].voltage <
+		if (mod->cell[i].voltage <
 		   (TBMS_BALANCE_VOLTAGE - TBMS_BALANCE_HYST))
-			mod->cell[id].balance = false;
+			mod->cell[i].balance = false;
 
-		mod->balance_bits |= ((mod->cell[id].balance ? 1 : 0) << i);
+		mod->balance_bits |= ((mod->cell[i].balance ? 1 : 0) << i);
 	}
 	
 	if (!mod->balance_bits)
