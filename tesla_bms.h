@@ -241,6 +241,12 @@ const char *tbms_io_get_state_name(uint8_t state)
 #endif
 
 //////////////////////////// TESLA BMS MAIN INSTANCE //////////////////////////
+enum tbms_task_event { //Events returned by tasks
+	TBMS_TASK_EVENT_NONE, //No event, keep running
+	TBMS_TASK_EVENT_EXIT_OK,
+	TBMS_TASK_EVENT_EXIT_FAULT
+};
+
 enum tbms_state {
 	TBMS_STATE_INIT,
 	TBMS_STATE_ESTABLISH_CONNECTION,
@@ -307,12 +313,6 @@ void tbms_init(struct tbms *self)
 }
 
 //////////////////// TASK DEFINITIONS ////////////////////
-enum tbms_task_event { //Events returned by tasks
-	TBMS_TASK_EVENT_NONE, //No event, keep running
-	TBMS_TASK_EVENT_EXIT_OK,
-	TBMS_TASK_EVENT_EXIT_FAULT
-};
-
 enum tbms_task_event tbms_task_discover(struct tbms *self)
 {
 	async_dispatch(self->async_task_state);
@@ -427,20 +427,20 @@ enum tbms_task_event tbms_task_read_module_values(struct tbms *self, uint8_t id)
 	async_dispatch(self->async_task_state);
 	
 	//ADC Auto mode, read every ADC input we can(Both Temps, Pack, 6 cells)
-	uint8_t cmd0[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+	uint8_t cmd0[] = {(uint8_t)(TBMS_WRITE | TBMS_MODULE(id + 1)),
 			  TBMS_REG_ADC_CTRL, 0b00111101 };
 	async_await(tbms_io_send(&self->io, cmd0, 3, 4),
 		    return TBMS_TASK_EVENT_NONE);
 
 	//enable temperature measurement VSS pins
-  	uint8_t cmd1[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+  	uint8_t cmd1[] = {(uint8_t)(TBMS_WRITE | TBMS_MODULE(id + 1)),
 			  TBMS_REG_IO_CTRL, 0b00000011 };
 	async_await(tbms_io_send(&self->io, cmd1, 3, 4),
 		    return TBMS_TASK_EVENT_NONE);
 
 
 	//start all ADC conversions
-  	uint8_t cmd2[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+  	uint8_t cmd2[] = {(uint8_t)(TBMS_WRITE | TBMS_MODULE(id + 1)),
 			  TBMS_REG_ADC_CONV, 1 };
 	async_await(tbms_io_send(&self->io, cmd2, 3, 4),
 		    return TBMS_TASK_EVENT_NONE);
@@ -448,7 +448,7 @@ enum tbms_task_event tbms_task_read_module_values(struct tbms *self, uint8_t id)
 
 	//start reading registers at the module voltage registers
   	//read 18 bytes (Each value takes 2 - ModuleV, CellV1-6, Temp1, Temp2)
-  	uint8_t cmd3[] = {TBMS_READ | TBMS_MODULE(id + 1),
+  	uint8_t cmd3[] = {(uint8_t)(TBMS_READ | TBMS_MODULE(id + 1)),
 			  TBMS_REG_GPAI, 0x12 };
 	async_await(tbms_io_send(&self->io, cmd3, 3, 22),
 		    return TBMS_TASK_EVENT_NONE);
@@ -521,7 +521,7 @@ enum tbms_task_event tbms_task_balance_cells(struct tbms *self, uint8_t id)
 	if (!mod->balance_bits)
 		async_reset(return TBMS_TASK_EVENT_EXIT_OK);
 
-	uint8_t cmd0[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+	uint8_t cmd0[] = {(uint8_t)(TBMS_WRITE | TBMS_MODULE(id + 1)),
 			  TBMS_REG_BAL_CTRL, 0 };
 	/* last byte resets balance time and must be done
 	   before setting balance resistors again. */
@@ -531,7 +531,7 @@ enum tbms_task_event tbms_task_balance_cells(struct tbms *self, uint8_t id)
 
 	if (mod->balance_bits) //only send balance command when needed
 	{
-		uint8_t cmd0[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+		uint8_t cmd0[] = {(uint8_t)(TBMS_WRITE | TBMS_MODULE(id + 1)),
 				  TBMS_REG_BAL_TIME, 130 };
 		//last byte sets balance for 130 seconds
 
@@ -539,7 +539,7 @@ enum tbms_task_event tbms_task_balance_cells(struct tbms *self, uint8_t id)
 			    return TBMS_TASK_EVENT_NONE);
 
 
-		uint8_t cmd1[] = {TBMS_WRITE | TBMS_MODULE(id + 1),
+		uint8_t cmd1[] = {(uint8_t)(TBMS_WRITE | TBMS_MODULE(id + 1)),
 				  TBMS_REG_BAL_CTRL, mod->balance_bits };
 		//write balance state to register
 
@@ -635,16 +635,16 @@ void tbms_update(struct tbms *self, clock_t delta)
 	self->io.timer += delta;
 	self->timer    += delta;
 
+	tbms_io_update(&self->io);
+
 	//If there is any INPUT/OUTPUT timeout
 	if (self->io.state == TBMS_IO_STATE_TIMEOUT) {
 		//Reset any running task
 		self->async_task_state = 0;
 		
-		//If we're establishing connection - reset its state
-		if (self->state == TBMS_STATE_ESTABLISH_CONNECTION) {
-			self->state = TBMS_STATE_INIT;
-			self->async_state = 0;
-		}
+		//Goto reset state (initial)
+		self->state = TBMS_STATE_INIT;
+		self->async_state = 0;
 	}
 
 	async_dispatch(self->async_state);
@@ -686,17 +686,19 @@ void tbms_update(struct tbms *self, clock_t delta)
 		break;
 
 	case TBMS_STATE_CONNECTION_ESTABLISHED:
-		//Iterate through all modules and read their values
+		//Iterate through all modules
 		for (self->mod_sel = 0; self->mod_sel < TBMS_MAX_MODULE_ADDR;
 		     self->mod_sel++) {
 			if (!self->modules[self->mod_sel].exist)
 				continue;
 			
+			//Read module values
 			async_await(
 				tbms_task_read_module_values(self,
 							     self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
 
+			//Balance cells
 			async_await(
 				tbms_task_balance_cells(self, self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
