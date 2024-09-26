@@ -284,6 +284,20 @@ struct tbms
 	bool ready;
 };
 
+void tbms_modules_init(struct tbms *self)
+{
+	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
+		self->modules[i].exist   = false;
+		self->modules[i].voltage = 0.0;
+		self->modules[i].balance_bits = 0;
+		for (int j = 0; j < 6; j++)
+			self->modules[i].cell[j].voltage = NAN;
+	}
+
+	self->modules_count = 0;
+	self->mod_sel = 0;
+}
+
 void tbms_init(struct tbms *self)
 {
 	self->state = TBMS_STATE_INIT;
@@ -295,15 +309,7 @@ void tbms_init(struct tbms *self)
 
 	tbms_io_init(&self->io);
 
-	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
-		self->modules[i].exist   = false;
-		self->modules[i].voltage = 0.0;
-		self->modules[i].balance_bits = 0;
-		for (int j = 0; j < 6; j++)
-			self->modules[i].cell[j].voltage = NAN;
-	}
-	self->modules_count = 0;
-	self->mod_sel = 0;
+	tbms_modules_init(self);
 	
 	self->timer = 0;
 
@@ -666,6 +672,9 @@ void tbms_update(struct tbms *self, clock_t delta)
 		//Wait 1 second before initialization
 		self->timer = 0;
 		ASYNC_AWAIT(self->timer >= 1000, return);
+
+		//Reset all modules state
+		tbms_modules_init(self);
 
 		self->current_task = &task_list[0];
 		self->state = TBMS_STATE_ESTABLISH_CONNECTION;

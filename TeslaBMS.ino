@@ -66,6 +66,11 @@ uint8_t esp_idf_uart_read()
 	return byte;
 }
 
+void esp_idf_uart_flush()
+{
+	uart_flush(UART_NUM_2);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 #define TBMS_DEBUG
 #include "tesla_bms.h"
@@ -102,6 +107,8 @@ void loop()
 	clock_t delta = get_delta_time_ms();
 	
 	if (tbms_tx_available(&tb)) {
+		esp_idf_uart_flush(); //Flush RX buffer before TX;
+		
 		esp_idf_uart_write(tbms_get_tx_buf(&tb), tbms_get_tx_len(&tb));
 		
 		/*for (size_t i = 0; i < tbms_get_tx_len(&tb); i++)
