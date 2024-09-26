@@ -663,6 +663,10 @@ void tbms_update(struct tbms *self, clock_t delta)
 
 	switch (self->state) {
 	case TBMS_STATE_INIT:
+		//Wait 1 second before initialization
+		self->timer = 0;
+		ASYNC_AWAIT(self->timer >= 1000, return);
+
 		self->current_task = &task_list[0];
 		self->state = TBMS_STATE_ESTABLISH_CONNECTION;
 		break;
@@ -692,6 +696,12 @@ void tbms_update(struct tbms *self, clock_t delta)
 		break;
 
 	case TBMS_STATE_CONNECTION_ESTABLISHED:
+		//We can not proceed with zero modules
+		if (self->modules_count <= 0) {
+			self->state = TBMS_STATE_INIT;
+			self->async_state = 0;
+		}
+
 		//Iterate through all modules
 		for (self->mod_sel = 0; self->mod_sel < TBMS_MAX_MODULE_ADDR;
 		     self->mod_sel++) {

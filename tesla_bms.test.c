@@ -71,7 +71,7 @@ void update()
 		tbms_tx_flush(&tb);
 	
 				   //UNCOMMENT TO TEST TIMEOUT
-	if (tbms_rx_available(&tb) && reply_i < 50) {
+	if (tbms_rx_available(&tb) /* && reply_i < 50 */) {
 		tbms_set_rx(&tb, reply[reply_i]);
 		
 		if (reply_i < sizeof(reply) - 1)
