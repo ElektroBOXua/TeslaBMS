@@ -42,7 +42,7 @@ void print_stats(clock_t delta)
 	static async state;
 	static clock_t timer = 0;
 	
-	async_dispatch(state);
+	ASYNC_DISPATCH(state);
 	
 	printf("Module 0 voltage:         %f\n",
 		tbms_get_module_voltage(&tb, 0));
@@ -53,11 +53,11 @@ void print_stats(clock_t delta)
 			tbms_get_module_cell_voltage(&tb, 0, i));
 	//printf("Module 0 temp2:    %f\n", tbms_get_module_temp2(&tb, 0));
 	
-	async_await((timer += delta) >= 1500, return);
+	ASYNC_AWAIT((timer += delta) >= 1500, return);
 	
 	timer = 0;
 	
-	async_reset(return);
+	ASYNC_RESET(return);
 }
 
 static uint8_t reply_i = 0;
