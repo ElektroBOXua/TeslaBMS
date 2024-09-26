@@ -133,11 +133,11 @@ void tbms_io_reset(struct tbms_io *self)
 bool tbms_io_recv(struct tbms_io *self, uint8_t expected_len)
 {
 	ASYNC_DISPATCH(self->rx_state);
-	
+
 	self->ready = false;
 	self->len   = 0;
 	self->timer = 0;
-	
+
 	self->state = TBMS_IO_STATE_WAIT_FOR_REPLY;
 	ASYNC_AWAIT((self->ready = true, self->len) >= expected_len,
 		    return false);
@@ -166,7 +166,7 @@ bool tbms_io_send(struct tbms_io *self, uint8_t *data, uint8_t len,
 
 		len++;
 	}
-	
+
 	self->ready = true;
 	self->len = len;
 	self->timer = 0;
@@ -280,6 +280,8 @@ struct tbms
 	uint8_t mod_sel;
 	
 	clock_t timer;
+
+	bool ready;
 };
 
 void tbms_init(struct tbms *self)
@@ -304,6 +306,8 @@ void tbms_init(struct tbms *self)
 	self->mod_sel = 0;
 	
 	self->timer = 0;
+
+	self->ready = false;
 }
 
 //////////////////// TASK DEFINITIONS ////////////////////
@@ -586,6 +590,12 @@ void tbms_tx_flush(struct tbms *self)
 		self->io.ready = false;
 }
 
+//When tbms values is safe to use
+bool tbms_is_ready(struct tbms *self)
+{
+	return self->ready;
+}
+
 //////////////////// API (MODULE) ////////////////////
 #define TBMS_MODULE_METHOD_CHECKS(ret) \
 	if (id >= TBMS_MAX_MODULE_ADDR) id = TBMS_MAX_MODULE_ADDR - 1; \
@@ -639,6 +649,8 @@ void tbms_update(struct tbms *self, clock_t delta)
 		//Goto reset state (initial)
 		self->state = TBMS_STATE_INIT;
 		self->async_state = 0;
+
+		self->ready = false;
 	}
 
 	ASYNC_DISPATCH(self->async_state);
@@ -697,6 +709,8 @@ void tbms_update(struct tbms *self, clock_t delta)
 				tbms_task_balance_cells(self, self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
 		}
+
+		self->ready = true;
 		
 		self->timer = 0;
 		ASYNC_AWAIT(self->timer >= 1000, return);
@@ -773,6 +787,7 @@ typedef struct tbms tbms_orig;
 #define tbms_tx_flush(s)     tbms_tx_flush((tbms_orig *)s)
 #define tbms_rx_available(s) tbms_rx_available((tbms_orig *)s)
 #define tbms_set_rx(s, a)    tbms_set_rx((tbms_orig *)s, a)
+#define tbms_is_ready(s)     tbms_is_ready((tbms_orig *)s)
 #define tbms_get_module_temp1(s, a) \
 	tbms_get_module_temp1((tbms_orig *)s, a)
 #define tbms_get_module_voltage(s, a) \
