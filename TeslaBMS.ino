@@ -82,16 +82,16 @@ void print_stats(clock_t delta)
 	static async state;
 	static clock_t timer = 0;
 	
-	async_dispatch(state);
+	ASYNC_DISPATCH(state);
 	
 	printf("PACK VOLTAGE %f\n", tbms_get_module_voltage(&tb, 0));
 	printf("PACK TEMP    %f\n", tbms_get_module_temp1(&tb, 0));
 	
-	async_await((timer += delta) >= 1000, return);
+	ASYNC_AWAIT((timer += delta) >= 1000, return);
 	
 	timer = 0;
 	
-	async_reset(return);
+	ASYNC_RESET(return);
 }
 
 void setup()
