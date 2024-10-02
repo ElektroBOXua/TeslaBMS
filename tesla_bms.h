@@ -253,6 +253,8 @@ struct tbms_module_cell {
 };
 
 struct tbms_module {
+	bool exist;
+
 	float voltage;
 	
 	float  temp1;
@@ -261,7 +263,12 @@ struct tbms_module {
 	struct tbms_module_cell cell[6];
 	uint8_t balance_bits;
 	
-	bool   exist;
+	uint8_t alerts;
+	uint8_t faults;
+
+	//Cell overvoltage and undervoltage faults
+	uint8_t cov_faults;
+	uint8_t cuv_faults;
 };
 
 struct tbms
@@ -287,11 +294,19 @@ struct tbms
 void tbms_modules_init(struct tbms *self)
 {
 	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
-		self->modules[i].exist   = false;
-		self->modules[i].voltage = 0.0;
-		self->modules[i].balance_bits = 0;
+		struct tbms_module *mod = &self->modules[i];
+
+		mod->exist   = false;
+		mod->voltage = 0.0;
+		mod->balance_bits = 0;
 		for (int j = 0; j < 6; j++)
-			self->modules[i].cell[j].voltage = NAN;
+			mod->cell[j].voltage = NAN;
+		
+		mod->alerts = 0xFF;
+		mod->faults = 0xFF;
+
+		mod->cov_faults = 0xFF;
+		mod->cuv_faults = 0xFF;
 	}
 
 	self->modules_count = 0;
@@ -421,6 +436,28 @@ enum tbms_task_event tbms_task_clear_faults(struct tbms *self)
 	ASYNC_AWAIT(tbms_io_send(&self->io, cmd3, 3, 4),
 		    return TBMS_TASK_EVENT_NONE);
 
+	ASYNC_RESET(return TBMS_TASK_EVENT_EXIT_OK);
+}
+
+enum tbms_task_event tbms_task_read_module_status(struct tbms *self,
+						  uint8_t id)
+{
+	struct tbms_module *mod = &self->modules[id];
+
+	ASYNC_DISPATCH(self->async_task_state);
+
+	uint8_t cmd0[] = {(uint8_t)(TBMS_READ | TBMS_MODULE(id + 1)),
+			  TBMS_REG_ALERT_STATUS, 4 };
+	ASYNC_AWAIT(tbms_io_send(&self->io, cmd0, 3, 7),
+		    return TBMS_TASK_EVENT_NONE);
+
+	mod->alerts = self->io.buf[3];
+	mod->faults = self->io.buf[4];
+
+	//Cell overvoltage and undervoltage faults
+	mod->cov_faults = self->io.buf[5];
+	mod->cuv_faults = self->io.buf[6];
+	
 	ASYNC_RESET(return TBMS_TASK_EVENT_EXIT_OK);
 }
 
@@ -596,10 +633,23 @@ void tbms_tx_flush(struct tbms *self)
 		self->io.ready = false;
 }
 
-//When tbms values is safe to use
+bool tbms_has_faults(struct tbms *self)
+{
+	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
+		struct tbms_module *mod = &self->modules[i];
+		
+		if (/*mod->alerts || */mod->faults || mod->cov_faults || 
+		    mod->cuv_faults)
+			return false;
+	}
+
+	return true;
+}
+
+//Returns true if TBMS is safe to use
 bool tbms_is_ready(struct tbms *self)
 {
-	return self->ready;
+	return self->ready && !tbms_has_faults(self);
 }
 
 //////////////////// API (MODULE) ////////////////////
@@ -716,7 +766,7 @@ void tbms_update(struct tbms *self, clock_t delta)
 		     self->mod_sel++) {
 			if (!self->modules[self->mod_sel].exist)
 				continue;
-			
+
 			//Read module values
 			ASYNC_AWAIT(
 				tbms_task_read_module_values(self,
@@ -726,6 +776,12 @@ void tbms_update(struct tbms *self, clock_t delta)
 			//Balance cells
 			ASYNC_AWAIT(
 				tbms_task_balance_cells(self, self->mod_sel) !=
+				TBMS_TASK_EVENT_NONE, return);
+
+			//Read module status
+			ASYNC_AWAIT(
+				tbms_task_read_module_status(self,
+							     self->mod_sel) !=
 				TBMS_TASK_EVENT_NONE, return);
 		}
 
