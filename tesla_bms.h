@@ -298,6 +298,10 @@ void tbms_modules_init(struct tbms *self)
 
 		mod->exist   = false;
 		mod->voltage = 0.0;
+
+		mod->temp1 = 0.0;
+		mod->temp2 = 0.0;
+
 		mod->balance_bits = 0;
 		for (int j = 0; j < 6; j++)
 			mod->cell[j].voltage = NAN;
@@ -638,12 +642,15 @@ bool tbms_has_faults(struct tbms *self)
 	for (int i = 0; i < TBMS_MAX_MODULE_ADDR; i++) {
 		struct tbms_module *mod = &self->modules[i];
 		
+		if (!mod->exist)
+			continue;
+		
 		if (/*mod->alerts || */mod->faults || mod->cov_faults || 
 		    mod->cuv_faults)
-			return false;
+			return true;
 	}
 
-	return true;
+	return false;
 }
 
 //Returns true if TBMS is safe to use
@@ -719,6 +726,8 @@ void tbms_update(struct tbms *self, clock_t delta)
 
 	switch (self->state) {
 	case TBMS_STATE_INIT:
+		self->ready = false;
+	
 		//Wait 1 second before initialization
 		self->timer = 0;
 		ASYNC_AWAIT(self->timer >= 1000, return);
@@ -759,6 +768,7 @@ void tbms_update(struct tbms *self, clock_t delta)
 		if (self->modules_count <= 0) {
 			self->state = TBMS_STATE_INIT;
 			self->async_state = 0;
+			break;
 		}
 
 		//Iterate through all modules
