@@ -298,6 +298,10 @@ void tbms_modules_init(struct tbms *self)
 
 		mod->exist   = false;
 		mod->voltage = 0.0;
+
+		mod->temp1 = 0.0;
+		mod->temp2 = 0.0;
+
 		mod->balance_bits = 0;
 		for (int j = 0; j < 6; j++)
 			mod->cell[j].voltage = NAN;
@@ -386,8 +390,8 @@ enum tbms_task_event tbms_task_setup_boards(struct tbms *self)
 		(uint8_t)((self->mod_sel + 1) | 0x80)
 	};
 
-	ASYNC_AWAIT(tbms_io_send(&self->io, cmd2, 3, 10) ||
-		    self->io.timer >= 50, return TBMS_TASK_EVENT_NONE);
+	ASYNC_AWAIT(tbms_io_send(&self->io, cmd2, 3, 4/*10*/) /*||
+		    self->io.timer >= 50*/, return TBMS_TASK_EVENT_NONE);
 
 	if (self->io.len < 3)
 		ASYNC_RESET(return TBMS_TASK_EVENT_EXIT_FAULT);
