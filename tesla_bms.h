@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <math.h>
+#include <float.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifndef ASYNC
@@ -28,7 +29,7 @@ typedef void * async;
 #define TBMS_MAX_IO_BUF      40
 
 //TODO make these configurable
-#define TBMS_BALANCE_VOLTAGE 3.9
+#define TBMS_BALANCE_VOLTAGE 3.8
 #define TBMS_BALANCE_HYST    0.04
 
 //////////////////////////// REGISTER RELATED STUFF ///////////////////////////
@@ -550,17 +551,25 @@ enum tbms_task_event tbms_task_balance_cells(struct tbms *self, uint8_t id)
 
 	mod->balance_bits = 0; //bit 0-5 are to activate cell balancing 1-6
 
+	//Find min voltage
+	float min_voltage =  FLT_MAX;
+
+	for (int i = 0; i < 6; i++)
+		if (mod->cell[i].voltage < min_voltage)
+			min_voltage = mod->cell[i].voltage;
+
 	for (int i = 0; i < 6; i++) {
-		//If voltage greater than activation threshold - set balance on
-		if (mod->cell[i].voltage > TBMS_BALANCE_VOLTAGE)
-			mod->cell[i].balance = true;
+		mod->cell[i].balance = false;
 
-		//If voltage is lower than release threshold - set balance off
-		if (mod->cell[i].voltage <
-		   (TBMS_BALANCE_VOLTAGE - TBMS_BALANCE_HYST))
-			mod->cell[i].balance = false;
+		//Do not balance if lower than balance voltage
+		//Or if within range of min voltage + hysteresis
+		if (mod->cell[i].voltage < TBMS_BALANCE_VOLTAGE ||
+		    mod->cell[i].voltage < (min_voltage + TBMS_BALANCE_HYST))
+			continue;
+		
+		mod->cell[i].balance = true;
 
-		mod->balance_bits |= ((mod->cell[i].balance ? 1 : 0) << i);
+		mod->balance_bits |= (1 << i);
 	}
 	
 	if (!mod->balance_bits)
